@@ -1,0 +1,133 @@
+version: 2
+
+models:
+  - name: dim_plant
+    description: >
+      Type 1 SCD: one row per (site_code, gen_code).
+      fuel_type reflects the latest snapshot only.
+    columns:
+      - name: plant_id
+        description: "Surrogate key: site_code + gen_code"
+        tests:
+          - not_null
+          - unique
+      - name: site_code
+        tests:
+          - not_null
+      - name: gen_code
+        tests:
+          - not_null
+          - unique:
+              config:
+                severity: warn
+      - name: fuel_type
+        tests:
+          - not_null
+
+  - name: fct_generation
+    description: >
+      One row per generator x trading period. generation_kwh in kWh.
+      fuel_type is the transaction-time snapshot from stg_generation.
+    columns:
+      - name: generation_id
+        tests:
+          - not_null
+          - unique
+      - name: plant_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_plant')
+              field: plant_id
+      - name: trading_date
+        tests:
+          - not_null
+      - name: generation_kwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1000000
+              config:
+                severity: warn
+
+  - name: mart_generation_daily
+    description: "Daily generation by fuel type. GWh for dashboard readability."
+    columns:
+      - name: trading_date
+        tests:
+          - not_null
+      - name: fuel_type
+        tests:
+          - not_null
+      - name: total_generation_kwh
+        tests:
+          - not_null
+      - name: total_generation_gwh
+        tests:
+          - not_null
+
+  - name: mart_generation_monthly
+    description: "Monthly generation by fuel type."
+    columns:
+      - name: year_month
+        tests:
+          - not_null
+      - name: fuel_type
+        tests:
+          - not_null
+      - name: total_generation_kwh
+        tests:
+          - not_null
+      - name: active_days
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 31
+
+  - name: mart_renewable_ratio
+    description: >
+      Monthly renewable energy ratio. Renewable = Hydro + Geothermal +
+      Wind + Solar + Wood. Battery excluded (storage, not generation).
+    columns:
+      - name: year_month
+        tests:
+          - not_null
+          - unique
+      - name: renewable_pct
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
+  - name: mart_plant_ranking
+    description: "Monthly plant ranking by total generation."
+    columns:
+      - name: year_month
+        tests:
+          - not_null
+      - name: site_code
+        tests:
+          - not_null
+      - name: monthly_rank
+        tests:
+          - not_null
+
+  - name: mart_seasonal_pattern
+    description: >
+      Seasonal generation pattern. NZ seasons: Summer Dec-Feb,
+      Autumn Mar-May, Winter Jun-Aug, Spring Sep-Nov.
+      December belongs to next year's season_year.
+    columns:
+      - name: season_year
+        tests:
+          - not_null
+      - name: season
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Summer', 'Autumn', 'Winter', 'Spring']
+      - name: fuel_type
+        tests:
+          - not_null

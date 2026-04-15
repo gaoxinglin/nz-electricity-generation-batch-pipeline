@@ -1,0 +1,13 @@
+raw_fuel_code,fuel_type,is_renewable
+Gas,Gas,false
+Hydro,Hydro,true
+HYD,Hydro,true
+Geo,Geothermal,true
+GEO,Geothermal,true
+Wind,Wind,true
+Diesel,Diesel,false
+Coal,Coal,false
+Wood,Wood,true
+Solar,Solar,true
+SOL,Solar,true
+ELE,Battery,false
