@@ -1,0 +1,13 @@
+# AWS
+aws_region         = "ap-southeast-2"
+s3_bucket_name     = "nz-electricity-generation"
+budget_alert_email = "your-email@example.com"
+
+# Snowflake
+snowflake_organization_name    = "your-org"
+snowflake_account_name         = "your-account"
+snowflake_user                 = "your-admin-user"
+snowflake_password             = "your-admin-password"
+snowflake_database             = "NZ_ELECTRICITY"
+snowflake_transformer_password = "transformer-svc-password"
+snowflake_reader_password      = "reader-svc-password"
