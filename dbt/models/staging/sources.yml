@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: raw
+    database: "{{ env_var('SNOWFLAKE_DATABASE') }}"
+    schema: RAW
+    freshness:
+      warn_after:
+        count: 35
+        period: day
+      error_after:
+        count: 45
+        period: day
+    loaded_at_field: _source_file_modified_at
+    tables:
+      - name: raw_generation
+        description: >
+          Raw EMI generation data loaded via COPY INTO.
+          59 columns: 57 CSV columns (all VARCHAR) + trading_month (VARCHAR)
+          + _source_file_modified_at (TIMESTAMP_NTZ).

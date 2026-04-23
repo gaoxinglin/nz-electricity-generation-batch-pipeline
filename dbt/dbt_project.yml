@@ -1,0 +1,29 @@
+name: nz_electricity
+version: '1.0.0'
+
+profile: nz_electricity
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+macro-paths: ["macros"]
+
+packages-install-path: /opt/dbt_build/dbt_packages
+
+clean-targets:
+  - target
+  - logs
+
+models:
+  nz_electricity:
+    staging:
+      +schema: raw
+      +materialized: table
+    core:
+      +schema: analytics
+      +materialized: table
+
+seeds:
+  nz_electricity:
+    +schema: raw

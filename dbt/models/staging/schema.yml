@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_generation
+    description: >
+      Unpivoted generation data: one row per generator x trading period.
+      LATERAL FLATTEN TP1-TP50, NULL filtered, fuel code standardised via
+      INNER JOIN on fuel_codes seed, deduplicated by last-write-wins.
+    columns:
+      - name: generation_id
+        description: "Surrogate key: site_code + gen_code + trading_date + trading_period"
+        tests:
+          - not_null
+          - unique
+      - name: site_code
+        tests:
+          - not_null
+      - name: gen_code
+        tests:
+          - not_null
+      - name: fuel_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Gas', 'Hydro', 'Geothermal', 'Wind', 'Diesel', 'Coal', 'Wood', 'Solar', 'Battery']
+      - name: trading_date
+        tests:
+          - not_null
+      - name: trading_period
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: generation_kwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 1000000
+              config:
+                severity: warn
+
+  - name: stg_generation_null_audit
+    description: >
+      TP1-TP46 NULLs only (anomalous). TP47-50 NULLs are expected (DST)
+      and excluded from this view.
