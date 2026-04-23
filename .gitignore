@@ -36,6 +36,9 @@ dbt/package-lock.yml
 airflow/logs/
 airflow/plugins/
 
+# Streamlit
+streamlit/.streamlit/secrets.toml
+
 # IDE
 .vscode/
 .idea/
