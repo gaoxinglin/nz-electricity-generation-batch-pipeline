@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | **Stack** | Airflow · dbt · Snowflake · S3 · Terraform · Streamlit |
-| **Data** | 10 years, ~5M rows, 124 monthly CSV files |
+| **Data** | 10 years, ~5M rows, 123 monthly CSV files |
 | **Pipeline** | 7-task DAG, idempotent, transactional loads |
 | **Dashboard** | [Live demo →](#) (5 pages, interactive filters) |
 
@@ -169,7 +169,7 @@ nz-electricity-generation-batch-pipeline/
 
 | Metric | Value |
 |--------|-------|
-| Full backfill (124 months ingest) | ~20 min |
+| Full backfill (123 months ingest) | ~20 min |
 | `dbt run --full-refresh` | ~2 min (XS warehouse) |
 | Incremental monthly run | ~30 sec |
 | Snowflake credits (monthly) | < 0.5 credits |
