@@ -43,10 +43,9 @@ variable "snowflake_user" {
   type        = string
 }
 
-variable "snowflake_password" {
-  description = "Snowflake admin password for Terraform provider"
+variable "snowflake_private_key_path" {
+  description = "Path to the RSA private key file for Terraform provider authentication"
   type        = string
-  sensitive   = true
 }
 
 variable "snowflake_database" {
