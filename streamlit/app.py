@@ -5,11 +5,12 @@ NZ Electricity Generation Dashboard
 Connects via snowflake-connector-python with reader role + dashboard warehouse.
 """
 
-import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import snowflake.connector
+
+import streamlit as st
 
 # ──────────────────────────────────────────────
 # Page config

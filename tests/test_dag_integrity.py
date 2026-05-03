@@ -1,6 +1,7 @@
 """DAG integrity tests — validates structure without requiring Airflow runtime."""
 
 import pytest
+
 from airflow.models import DagBag
 
 

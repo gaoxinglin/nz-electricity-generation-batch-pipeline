@@ -16,6 +16,7 @@ from datetime import datetime, timedelta
 
 import requests
 import snowflake.connector
+
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.bash import BashOperator
@@ -121,7 +122,7 @@ def validate_csv(**kwargs) -> None:
             f"File size {file_size} bytes outside expected range [1KB, 10MB]"
         )
 
-    with open(local_path, "r", encoding="utf-8") as f:
+    with open(local_path, encoding="utf-8") as f:
         reader = csv.reader(f)
         header = next(reader)
 
@@ -163,11 +164,11 @@ def validate_csv(**kwargs) -> None:
                     continue
                 try:
                     float(val)
-                except ValueError:
+                except ValueError as e:
                     raise ValueError(
                         f"Row {row_count}, column {i} (TP{i - 6}): "
                         f"non-numeric value '{val}'"
-                    )
+                    ) from e
 
     if not (100 <= row_count <= 50_000):
         raise ValueError(

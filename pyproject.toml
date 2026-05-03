@@ -1,12 +1,11 @@
-<<<<<<< HEAD
 [project]
 name = "nz-electricity-generation-batch-pipeline"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = []
-=======
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
@@ -17,4 +16,3 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["airflow"]
->>>>>>> 2a5c5a1 (Add Phase 4: polish, CI workflows, runbook, and layered README)

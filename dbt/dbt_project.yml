@@ -9,7 +9,7 @@ test-paths: ["tests"]
 analysis-paths: ["analyses"]
 macro-paths: ["macros"]
 
-packages-install-path: /opt/dbt_build/dbt_packages
+packages-install-path: dbt_packages
 
 clean-targets:
   - target

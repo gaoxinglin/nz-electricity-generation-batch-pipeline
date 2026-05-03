@@ -44,6 +44,8 @@ jobs:
                 schema: RAW
                 threads: 1
           EOF
+      - name: Install dbt packages
+        run: cd dbt && dbt deps
       - name: Lint dbt models
         run: sqlfluff lint dbt/models/ --dialect snowflake
 
