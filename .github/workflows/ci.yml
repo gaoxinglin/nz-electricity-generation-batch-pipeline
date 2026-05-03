@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
+
+env:
+  DBT_PROFILES_DIR: /tmp/dbt_ci
+
+jobs:
+  lint-python:
+    name: Ruff (Python lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+
+  lint-sql:
+    name: SQLFluff (SQL lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install sqlfluff sqlfluff-templater-dbt dbt-core dbt-snowflake
+      - name: Create CI profiles.yml
+        run: |
+          mkdir -p $DBT_PROFILES_DIR
+          cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
+          nz_electricity:
+            target: ci
+            outputs:
+              ci:
+                type: snowflake
+                account: dummy
+                user: dummy
+                password: dummy
+                role: dummy
+                warehouse: dummy
+                database: dummy
+                schema: RAW
+                threads: 1
+          EOF
+      - name: Lint dbt models
+        run: sqlfluff lint dbt/models/ --dialect snowflake
+
+  dbt-compile:
+    name: dbt compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-core dbt-snowflake
+      - name: Create CI profiles.yml
+        run: |
+          mkdir -p $DBT_PROFILES_DIR
+          cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
+          nz_electricity:
+            target: ci
+            outputs:
+              ci:
+                type: snowflake
+                account: dummy
+                user: dummy
+                password: dummy
+                role: dummy
+                warehouse: dummy
+                database: dummy
+                schema: RAW
+                threads: 1
+          EOF
+      - name: Install dbt packages
+        run: cd dbt && dbt deps
+      - name: Compile (syntax check only)
+        run: cd dbt && dbt compile
+
+  pytest:
+    name: DAG integrity tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          pip install apache-airflow==2.9.0 \
+            apache-airflow-providers-amazon \
+            snowflake-connector-python \
+            dbt-core dbt-snowflake \
+            pytest
+      - run: pytest tests/ -v

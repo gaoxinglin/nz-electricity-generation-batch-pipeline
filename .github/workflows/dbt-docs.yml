@@ -1,0 +1,71 @@
+name: dbt Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dbt/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  DBT_PROFILES_DIR: /tmp/dbt_ci
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-core dbt-snowflake
+      - name: Create CI profiles.yml
+        run: |
+          mkdir -p $DBT_PROFILES_DIR
+          cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
+          nz_electricity:
+            target: ci
+            outputs:
+              ci:
+                type: snowflake
+                account: dummy
+                user: dummy
+                password: dummy
+                role: dummy
+                warehouse: dummy
+                database: dummy
+                schema: RAW
+                threads: 1
+          EOF
+      - name: Install dbt packages
+        run: cd dbt && dbt deps
+      - name: Generate docs
+        run: cd dbt && dbt docs generate
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p _site
+          cp dbt/target/index.html _site/
+          cp dbt/target/manifest.json _site/
+          cp dbt/target/catalog.json _site/ 2>/dev/null || true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
