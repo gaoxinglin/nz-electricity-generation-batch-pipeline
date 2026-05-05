@@ -74,10 +74,33 @@ The Streamlit app answers four business questions:
 
 | Page | Question |
 |------|----------|
+| Overview | What is the current state of NZ electricity generation? |
 | Fuel Trends | How has NZ's generation mix evolved since 2016? |
 | Plant Ranking | Which power stations contribute the most each month? |
 | Renewable Share | How has NZ's renewable percentage changed over the decade? |
-| Seasonal Analysis | How does the generation mix differ between summer and winter? |
+| Seasonal Patterns | How does the generation mix differ between summer and winter? |
+
+#### Screenshots
+
+**Overview** — KPI cards with sparklines, fuel mix donut, 12-month stacked bar
+
+![Overview](docs/screenshots/01_overview.png)
+
+**Fuel Trends** — Stacked area chart with absolute/% toggle and 12-month rolling average
+
+![Fuel Trends](docs/screenshots/02_fuel_trends.png)
+
+**Plant Ranking** — Top-N horizontal bar with configurable N, full sortable table + CSV export
+
+![Plant Ranking](docs/screenshots/03_plant_ranking.png)
+
+**Renewable Share** — Full timeline with 12-month rolling average, annual bar chart + CSV export
+
+![Renewable Share](docs/screenshots/04_renewable_share.png)
+
+**Seasonal Patterns** — Season grouped bar and monthly heatmap by fuel type
+
+![Seasonal Patterns](docs/screenshots/05_seasonal_patterns.png)
 
 ---
 
@@ -122,7 +145,11 @@ nz-electricity-generation-batch-pipeline/
 │   ├── models/core/                        # dim_plant, fct_generation, 5 marts
 │   ├── tests/                              # Reconciliation + NULL anomaly tests
 │   └── seeds/fuel_codes.csv                # Fuel code standardisation lookup
-├── streamlit/app.py                        # 5-page dashboard
+├── streamlit/                              # 5-page dashboard (multi-page app)
+│   ├── app.py                              #   navigation entry point
+│   ├── loader.py                           #   Snowflake queries + caching
+│   ├── charts.py                           #   shared color palette + chart helpers
+│   └── pages/                              #   one file per page
 ├── terraform/                              # AWS S3 + Snowflake IaC
 ├── tests/test_dag_integrity.py             # pytest: 7 tasks, dependencies
 ├── docs/runbook.md                         # Failure diagnosis guide
