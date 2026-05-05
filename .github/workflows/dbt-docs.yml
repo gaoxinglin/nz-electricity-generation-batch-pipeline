@@ -50,10 +50,8 @@ jobs:
         run: cd dbt && dbt deps
       - name: Generate docs
         run: |
-          cd dbt
-          dbt parse
-          DBT_DOCS=$(python3 -c "import dbt.include.global_project as p, os; print(os.path.join(os.path.dirname(p.__file__), 'docs'))")
-          [ -d "$DBT_DOCS" ] && cp -r "$DBT_DOCS/." target/ || true
+          cd dbt && dbt parse && mkdir -p target
+          python3 -c "import site,os,shutil; [shutil.copy(p,'target/index.html') for d in site.getsitepackages() for p in [os.path.join(d,'dbt','include','global_project','docs','index.html')] if os.path.exists(p)] or open('target/index.html','w').write('<html><head><title>dbt Docs</title></head><body><p>dbt docs: <a href=\"manifest.json\">manifest.json</a></p></body></html>')"
           python3 -c "import json,datetime; json.dump({'metadata':{'generated_at':datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),'dbt_schema_version':'https://schemas.getdbt.com/dbt/catalog/v1.json'},'nodes':{},'sources':{},'errors':None},open('target/catalog.json','w'))"
       - name: Prepare Pages artifact
         run: |
