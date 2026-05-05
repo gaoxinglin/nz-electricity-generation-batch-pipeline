@@ -1,14 +1,15 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
-
 from charts import apply_layout, color_map
 from loader import load_monthly_raw, load_seasonal
+
+import streamlit as st
 
 SEASON_ORDER = ["Summer", "Autumn", "Winter", "Spring"]
 

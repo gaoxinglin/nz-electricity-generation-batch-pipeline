@@ -1,13 +1,14 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
-
 from charts import apply_layout, fmt_month
 from loader import load_renewable
+
+import streamlit as st
 
 st.title("Renewable Share")
 st.caption("NZ's renewable generation as a percentage of total output.")

@@ -1,12 +1,13 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import plotly.express as px
-import streamlit as st
-
 from charts import apply_layout, color_map, fmt_month
 from loader import load_ranking
+
+import streamlit as st
 
 st.title("Plant Ranking")
 st.caption("Top generators each month, ranked by site output.")
@@ -21,7 +22,7 @@ if ranking.empty:
 # ── Month + Top-N selectors ────────────────────────────────────────────────────
 all_months   = sorted(ranking["year_month"].unique(), reverse=True)
 month_labels = [fmt_month(m) for m in all_months]
-ym_by_label  = dict(zip(month_labels, all_months))
+ym_by_label  = dict(zip(month_labels, all_months, strict=True))
 
 col_a, col_b = st.columns([3, 1])
 selected_label = col_a.selectbox("Month", month_labels)

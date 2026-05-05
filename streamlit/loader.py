@@ -3,13 +3,14 @@ from contextlib import contextmanager
 
 import pandas as pd
 import snowflake.connector
-import streamlit as st
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     NoEncryption,
     PrivateFormat,
     load_pem_private_key,
 )
+
+import streamlit as st
 
 
 def _private_key_bytes() -> bytes:

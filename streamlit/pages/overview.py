@@ -1,13 +1,14 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import plotly.express as px
-import streamlit as st
-
 from charts import apply_layout, color_map, fmt_month, sparkline
 from loader import load_monthly, load_renewable
+
+import streamlit as st
 
 st.title("NZ Electricity — Overview")
 

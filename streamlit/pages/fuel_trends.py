@@ -1,13 +1,14 @@
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import plotly.graph_objects as go
 import plotly.express as px
-import streamlit as st
-
+import plotly.graph_objects as go
 from charts import apply_layout, color_map, fmt_month
 from loader import load_monthly, load_renewable
+
+import streamlit as st
 
 st.title("Fuel Trends")
 st.caption("How has NZ's generation mix evolved over time?")
@@ -23,7 +24,7 @@ if monthly.empty:
 # ── Date range selectors ───────────────────────────────────────────────────────
 all_months  = sorted(monthly["year_month"].unique())          # ["202001", ...]
 month_labels = [fmt_month(m) for m in all_months]             # ["Jan 2020", ...]
-ym_by_label  = dict(zip(month_labels, all_months))
+ym_by_label  = dict(zip(month_labels, all_months, strict=True))
 
 col_a, col_b = st.columns(2)
 start_label = col_a.selectbox("From", month_labels, index=0)
