@@ -11,9 +11,9 @@
     Full rebuild every dbt run (~5M rows, ~5-10s on XS).
 */
 
-select
+SELECT
     generation_id,
-    {{ dbt_utils.generate_surrogate_key(['site_code', 'gen_code']) }} as plant_id,
+    {{ dbt_utils.generate_surrogate_key(['site_code', 'gen_code']) }} AS plant_id,
     site_code,
     gen_code,
     fuel_type,
@@ -22,4 +22,4 @@ select
     trading_month,
     trading_period,
     generation_kwh
-from {{ ref('stg_generation') }}
+FROM {{ ref('stg_generation') }}

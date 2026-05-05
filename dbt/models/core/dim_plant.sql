@@ -10,28 +10,28 @@
     historical analysis should use fct_generation.fuel_type instead.
 */
 
-with latest as (
-    select
+WITH latest AS (
+    SELECT
         site_code,
         gen_code,
         poc_code,
         nwk_code,
         fuel_type,
         tech_code,
-        row_number() over (
-            partition by site_code, gen_code
-            order by _source_file_modified_at desc, trading_date desc
-        ) as rn
-    from {{ ref('stg_generation') }}
+        ROW_NUMBER() OVER (
+            PARTITION BY site_code, gen_code
+            ORDER BY _source_file_modified_at DESC, trading_date DESC
+        ) AS rn
+    FROM {{ ref('stg_generation') }}
 )
 
-select
-    {{ dbt_utils.generate_surrogate_key(['site_code', 'gen_code']) }} as plant_id,
+SELECT
+    {{ dbt_utils.generate_surrogate_key(['site_code', 'gen_code']) }} AS plant_id,
     site_code,
     gen_code,
     poc_code,
     nwk_code,
     fuel_type,
     tech_code
-from latest
-where rn = 1
+FROM latest
+WHERE rn = 1

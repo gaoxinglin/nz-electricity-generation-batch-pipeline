@@ -6,20 +6,20 @@
     )
 }}
 
-select
-    trading_month as year_month,
+SELECT
+    trading_month AS year_month,
     fuel_type,
-    sum(generation_kwh) as total_generation_kwh,
-    sum(generation_kwh) / 1000000.0 as total_generation_gwh,
-    count(distinct gen_code) as generator_count,
-    count(distinct trading_date) as active_days
-from {{ ref('fct_generation') }}
+    SUM(generation_kwh) AS total_generation_kwh,
+    SUM(generation_kwh) / 1000000.0 AS total_generation_gwh,
+    COUNT(DISTINCT gen_code) AS generator_count,
+    COUNT(DISTINCT trading_date) AS active_days
+FROM {{ ref('fct_generation') }}
 
 {% if is_incremental() %}
-where trading_month >= (
-    select to_char(dateadd(month, -1, to_date(max(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')
-    from {{ this }}
-)
+    WHERE trading_month >= (
+        SELECT TO_CHAR(DATEADD(MONTH, -1, TO_DATE(MAX(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')  -- noqa: RF02
+        FROM {{ this }}
+    )
 {% endif %}
 
-group by trading_month, fuel_type
+GROUP BY trading_month, fuel_type

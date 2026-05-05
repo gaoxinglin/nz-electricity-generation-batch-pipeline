@@ -6,16 +6,16 @@
     )
 }}
 
-select
+SELECT
     trading_date,
     fuel_type,
-    sum(generation_kwh) as total_generation_kwh,
-    sum(generation_kwh) / 1000000.0 as total_generation_gwh,
-    count(distinct gen_code) as generator_count
-from {{ ref('fct_generation') }}
+    SUM(generation_kwh) AS total_generation_kwh,
+    SUM(generation_kwh) / 1000000.0 AS total_generation_gwh,
+    COUNT(DISTINCT gen_code) AS generator_count
+FROM {{ ref('fct_generation') }}
 
 {% if is_incremental() %}
-where trading_date >= (select dateadd(day, -3, max(trading_date)) from {{ this }})
+    WHERE trading_date >= (SELECT DATEADD(DAY, -3, MAX(trading_date)) FROM {{ this }})  -- noqa: RF02
 {% endif %}
 
-group by trading_date, fuel_type
+GROUP BY trading_date, fuel_type

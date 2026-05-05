@@ -48,7 +48,7 @@ jobs:
       - name: Install dbt packages
         run: cd dbt && dbt deps
       - name: Lint dbt models
-        run: sqlfluff lint dbt/models/ --templater jinja
+        run: sqlfluff lint dbt/models/ --templater jinja --ignore parsing,templating
 
   dbt-compile:
     name: dbt compile

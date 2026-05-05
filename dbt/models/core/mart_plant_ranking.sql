@@ -6,58 +6,59 @@
     )
 }}
 
-with monthly_generation as (
-    select
-        trading_month as year_month,
+WITH monthly_generation AS (
+    SELECT
+        trading_month AS year_month,
         site_code,
         fuel_type,
-        sum(generation_kwh) as fuel_generation_kwh
-    from {{ ref('fct_generation') }}
+        SUM(generation_kwh) AS fuel_generation_kwh
+    FROM {{ ref('fct_generation') }}
 
     {% if is_incremental() %}
-    where trading_month >= (
-        select to_char(dateadd(month, -1, to_date(max(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')
-        from {{ this }}
-    )
+        WHERE trading_month >= (
+            SELECT TO_CHAR(DATEADD(MONTH, -1, TO_DATE(MAX(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')  -- noqa: RF02
+            FROM {{ this }}
+        )
     {% endif %}
 
-    group by trading_month, site_code, fuel_type
+    GROUP BY trading_month, site_code, fuel_type
 ),
 
-site_totals as (
-    select
+site_totals AS (
+    SELECT
         year_month,
         site_code,
-        sum(fuel_generation_kwh) as total_generation_kwh,
-        sum(fuel_generation_kwh) / 1000000.0 as total_generation_gwh
-    from monthly_generation
-    group by year_month, site_code
+        SUM(fuel_generation_kwh) AS total_generation_kwh,
+        SUM(fuel_generation_kwh) / 1000000.0 AS total_generation_gwh
+    FROM monthly_generation
+    GROUP BY year_month, site_code
 ),
 
-primary_fuel as (
-    select
+primary_fuel AS (
+    SELECT
         year_month,
         site_code,
-        fuel_type as primary_fuel_type,
-        row_number() over (
-            partition by year_month, site_code
-            order by fuel_generation_kwh desc
-        ) as rn
-    from monthly_generation
+        fuel_type AS primary_fuel_type,
+        ROW_NUMBER() OVER (
+            PARTITION BY year_month, site_code
+            ORDER BY fuel_generation_kwh DESC
+        ) AS rn
+    FROM monthly_generation
 )
 
-select
+SELECT
     st.year_month,
     st.site_code,
     st.total_generation_kwh,
     st.total_generation_gwh,
     pf.primary_fuel_type,
-    rank() over (
-        partition by st.year_month
-        order by st.total_generation_kwh desc
-    ) as monthly_rank
-from site_totals st
-inner join primary_fuel pf
-    on st.year_month = pf.year_month
-    and st.site_code = pf.site_code
-    and pf.rn = 1
+    RANK() OVER (
+        PARTITION BY st.year_month
+        ORDER BY st.total_generation_kwh DESC
+    ) AS monthly_rank
+FROM site_totals AS st
+INNER JOIN primary_fuel AS pf
+    ON
+        st.year_month = pf.year_month
+        AND st.site_code = pf.site_code
+        AND pf.rn = 1

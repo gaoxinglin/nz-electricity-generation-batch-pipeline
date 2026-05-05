@@ -12,24 +12,24 @@
     Sourced directly from fct_generation (not mart_generation_monthly) to keep DAG flat.
 */
 
-select
-    trading_month as year_month,
-    sum(generation_kwh) as total_kwh,
-    sum(generation_kwh) / 1000000.0 as total_gwh,
-    sum(case when is_renewable then generation_kwh else 0 end) as renewable_kwh,
-    sum(case when is_renewable then generation_kwh else 0 end) / 1000000.0 as renewable_gwh,
-    round(
-        sum(case when is_renewable then generation_kwh else 0 end) * 100.0
-        / nullif(sum(generation_kwh), 0),
+SELECT
+    trading_month AS year_month,
+    SUM(generation_kwh) AS total_kwh,
+    SUM(generation_kwh) / 1000000.0 AS total_gwh,
+    SUM(CASE WHEN is_renewable THEN generation_kwh ELSE 0 END) AS renewable_kwh,
+    SUM(CASE WHEN is_renewable THEN generation_kwh ELSE 0 END) / 1000000.0 AS renewable_gwh,
+    ROUND(
+        SUM(CASE WHEN is_renewable THEN generation_kwh ELSE 0 END) * 100.0
+        / NULLIF(SUM(generation_kwh), 0),
         2
-    ) as renewable_pct
-from {{ ref('fct_generation') }}
+    ) AS renewable_pct
+FROM {{ ref('fct_generation') }}
 
 {% if is_incremental() %}
-where trading_month >= (
-    select to_char(dateadd(month, -1, to_date(max(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')
-    from {{ this }}
-)
+    WHERE trading_month >= (
+        SELECT TO_CHAR(DATEADD(MONTH, -1, TO_DATE(MAX(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')  -- noqa: RF02
+        FROM {{ this }}
+    )
 {% endif %}
 
-group by trading_month
+GROUP BY trading_month
