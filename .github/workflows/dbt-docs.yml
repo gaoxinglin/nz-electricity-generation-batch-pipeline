@@ -49,7 +49,37 @@ jobs:
       - name: Install dbt packages
         run: cd dbt && dbt deps
       - name: Generate docs
-        run: cd dbt && dbt docs generate
+        run: |
+          cd dbt
+          dbt parse
+          python3 - <<'PYEOF'
+import dbt.include.global_project as pkg
+import json, os, shutil
+from datetime import datetime
+
+os.makedirs("target", exist_ok=True)
+
+# Copy static dbt-docs frontend (index.html etc.) bundled with the package
+docs_dir = os.path.join(os.path.dirname(pkg.__file__), "docs")
+if os.path.isdir(docs_dir):
+    for name in os.listdir(docs_dir):
+        src = os.path.join(docs_dir, name)
+        if os.path.isfile(src):
+            shutil.copy(src, os.path.join("target", name))
+
+# Write an empty catalog so the docs site loads without DB access
+catalog = {
+    "metadata": {
+        "generated_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "dbt_schema_version": "https://schemas.getdbt.com/dbt/catalog/v1.json",
+    },
+    "nodes": {},
+    "sources": {},
+    "errors": None,
+}
+with open("target/catalog.json", "w") as f:
+    json.dump(catalog, f)
+PYEOF
       - name: Prepare Pages artifact
         run: |
           mkdir -p _site

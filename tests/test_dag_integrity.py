@@ -12,7 +12,7 @@ def dagbag():
 
 @pytest.fixture(scope="module")
 def dag(dagbag):
-    dag = dagbag.get_dag("nz_electricity_monthly")
+    dag = dagbag.dags.get("nz_electricity_monthly")
     assert dag is not None, "DAG 'nz_electricity_monthly' not found"
     return dag
 

@@ -14,12 +14,14 @@ import os
 import tempfile
 from datetime import datetime, timedelta
 
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, Encoding, PrivateFormat, NoEncryption,
-)
-
 import requests
 import snowflake.connector
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    load_pem_private_key,
+)
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException

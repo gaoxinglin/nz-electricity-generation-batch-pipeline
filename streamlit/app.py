@@ -11,11 +11,13 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import snowflake.connector
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_private_key, Encoding, PrivateFormat, NoEncryption,
-)
-
 import streamlit as st
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    load_pem_private_key,
+)
 
 # ──────────────────────────────────────────────
 # Page config

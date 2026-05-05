@@ -44,6 +44,7 @@ jobs:
                 schema: RAW
                 threads: 1
           EOF
+          cp $DBT_PROFILES_DIR/profiles.yml dbt/profiles.yml
       - name: Install dbt packages
         run: cd dbt && dbt deps
       - name: Lint dbt models
@@ -78,8 +79,8 @@ jobs:
           EOF
       - name: Install dbt packages
         run: cd dbt && dbt deps
-      - name: Compile (syntax check only)
-        run: cd dbt && dbt compile
+      - name: Parse (syntax check only)
+        run: cd dbt && dbt parse
 
   pytest:
     name: DAG integrity tests
