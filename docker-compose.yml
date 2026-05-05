@@ -6,6 +6,7 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY:-}
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW__WEBSERVER__SECRET_KEY:-change-me-in-production}
     # dbt needs to find profiles.yml in the volume-mounted /opt/dbt/
     DBT_PROFILES_DIR: /opt/dbt
     # AWS
@@ -19,12 +20,15 @@ x-airflow-common: &airflow-common
     SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
     SNOWFLAKE_USER: ${SNOWFLAKE_USER}
     SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
+    SNOWFLAKE_PRIVATE_KEY_PATH: ${SNOWFLAKE_PRIVATE_KEY_PATH}
     SNOWFLAKE_ROLE: ${SNOWFLAKE_ROLE}
     SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE}
     SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./dbt:/opt/dbt
+    - airflow-logs:/opt/airflow/logs
+    - ~/.ssh/snowflake_rsa_key.p8:/opt/airflow/secrets/snowflake_rsa_key.p8:ro
   depends_on:
     postgres:
       condition: service_healthy
@@ -89,3 +93,4 @@ services:
 
 volumes:
   postgres-data:
+  airflow-logs:

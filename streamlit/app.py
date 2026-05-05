@@ -5,10 +5,15 @@ NZ Electricity Generation Dashboard
 Connects via snowflake-connector-python with reader role + dashboard warehouse.
 """
 
+import os
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import snowflake.connector
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key, Encoding, PrivateFormat, NoEncryption,
+)
 
 import streamlit as st
 
@@ -27,14 +32,19 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 
 def get_connection():
+    key_path = os.path.expanduser(st.secrets["snowflake"]["private_key_path"])
+    with open(key_path, "rb") as f:
+        private_key = load_pem_private_key(f.read(), password=None).private_bytes(
+            Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+        )
     return snowflake.connector.connect(
         account=st.secrets["snowflake"]["account"],
         user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
+        private_key=private_key,
         database=st.secrets["snowflake"]["database"],
         warehouse=st.secrets["snowflake"]["warehouse"],
         role=st.secrets["snowflake"]["role"],
-        schema="ANALYTICS",
+        schema="RAW_ANALYTICS",
     )
 
 
@@ -57,7 +67,7 @@ def load_monthly():
         select year_month, fuel_type,
                total_generation_kwh, total_generation_gwh,
                generator_count, active_days
-        from analytics.mart_generation_monthly
+        from RAW_ANALYTICS.mart_generation_monthly
         order by year_month, fuel_type
     """)
 
@@ -68,7 +78,7 @@ def load_daily():
         select trading_date, fuel_type,
                total_generation_kwh, total_generation_gwh,
                generator_count
-        from analytics.mart_generation_daily
+        from RAW_ANALYTICS.mart_generation_daily
         order by trading_date, fuel_type
     """)
 
@@ -77,7 +87,7 @@ def load_daily():
 def load_renewable():
     return run_query("""
         select year_month, total_gwh, renewable_gwh, renewable_pct
-        from analytics.mart_renewable_ratio
+        from RAW_ANALYTICS.mart_renewable_ratio
         order by year_month
     """)
 
@@ -87,7 +97,7 @@ def load_ranking():
     return run_query("""
         select year_month, site_code,
                total_generation_gwh, monthly_rank, primary_fuel_type
-        from analytics.mart_plant_ranking
+        from RAW_ANALYTICS.mart_plant_ranking
         order by year_month desc, monthly_rank
     """)
 
@@ -97,7 +107,7 @@ def load_seasonal():
     return run_query("""
         select season_year, season, fuel_type,
                total_generation_gwh, avg_generation_gwh
-        from analytics.mart_seasonal_pattern
+        from RAW_ANALYTICS.mart_seasonal_pattern
         order by season_year, season, fuel_type
     """)
 

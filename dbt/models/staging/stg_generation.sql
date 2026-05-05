@@ -20,7 +20,7 @@ flattened as (
         s.trading_month,
         s._source_file_modified_at,
         f.index + 1 as trading_period,
-        nullif(f.value::string, '') as tp_value_raw
+        nullif(nullif(f.value::string, chr(0)), '') as tp_value_raw
     from source s,
     lateral flatten(
         input => array_construct(

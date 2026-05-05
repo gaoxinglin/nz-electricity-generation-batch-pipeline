@@ -14,6 +14,10 @@ import os
 import tempfile
 from datetime import datetime, timedelta
 
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key, Encoding, PrivateFormat, NoEncryption,
+)
+
 import requests
 import snowflake.connector
 
@@ -33,7 +37,7 @@ S3_RAW_PREFIX = "raw/generation_md"
 
 EXPECTED_COLUMNS = 57
 KNOWN_FUEL_CODES = {
-    "Gas", "Hydro", "HYD", "Geo", "GEO", "Wind",
+    "Gas", "Gas&Oil", "Hydro", "HYD", "Geo", "GEO", "Wind", "WIN",
     "Diesel", "Coal", "Wood", "Solar", "SOL", "ELE",
 }
 
@@ -89,9 +93,16 @@ def download_csv(**kwargs) -> None:
     else:
         raise last_exc  # type: ignore[misc]
 
+    content = resp.content.replace(b"\x00", b"")
+    if len(content) != len(resp.content):
+        logger.warning(
+            "Stripped %d null bytes from %s",
+            resp.content.count(b"\x00"), filename,
+        )
+
     local_path = os.path.join(tempfile.gettempdir(), filename)
     with open(local_path, "wb") as f:
-        f.write(resp.content)
+        f.write(content)
 
     file_size = os.path.getsize(local_path)
     logger.info("Downloaded %s (%d bytes)", filename, file_size)
@@ -123,7 +134,7 @@ def validate_csv(**kwargs) -> None:
         )
 
     with open(local_path, encoding="utf-8") as f:
-        reader = csv.reader(f)
+        reader = csv.reader(line.replace("\x00", "") for line in f)
         header = next(reader)
 
         if len(header) != EXPECTED_COLUMNS:
@@ -220,10 +231,15 @@ def load_to_snowflake(**kwargs) -> None:
     year_month = ti.xcom_pull(key="year_month", task_ids="download_csv")
     filename = _csv_filename(year_month)
 
+    with open(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"], "rb") as f:
+        private_key = load_pem_private_key(f.read(), password=None).private_bytes(
+            Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+        )
+
     conn = snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
-        password=os.environ["SNOWFLAKE_PASSWORD"],
+        private_key=private_key,
         database=os.environ["SNOWFLAKE_DATABASE"],
         warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
         role=os.environ["SNOWFLAKE_ROLE"],
@@ -301,7 +317,7 @@ with DAG(
     default_args=default_args,
     description="Monthly NZ electricity generation data pipeline",
     schedule="0 0 15 * *",
-    start_date=datetime(2016, 1, 15),
+    start_date=datetime(2006, 1, 15),
     catchup=False,
     max_active_runs=3,
     tags=["nz-electricity", "elt"],
