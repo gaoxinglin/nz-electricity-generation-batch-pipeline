@@ -1,5 +1,59 @@
-.PHONY: build up down restart logs backfill dbt-full
+.PHONY: demo local-full local-subset dbt-test cloud-up cloud-backfill cloud-dbt-full cloud-dashboard \
+        build up down restart logs backfill dbt-full
 
+# ==================== 面试演示 ====================
+demo:                    ## ~60s 启动：下 1 个月数据 → DuckDB → Streamlit
+	uv sync
+	mkdir -p data/raw
+	uv run python scripts/download_generation.py --output data/raw/ --months 1
+	uv run python scripts/download_price.py --output data/raw/ --months 1 || true
+	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
+	cd dbt && uv run dbt seed --profiles-dir . --target dev \
+	    && uv run dbt run --profiles-dir . --target dev
+	NZEG_MODE=local uv run streamlit run streamlit/app.py
+
+# ==================== Local 模式 ====================
+local-full:              ## 一键全流程（全量历史 2016-至今）
+	uv sync
+	mkdir -p data/raw
+	uv run python scripts/download_generation.py --output data/raw/
+	uv run python scripts/download_price.py --output data/raw/ || true
+	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
+	cd dbt && uv run dbt seed --profiles-dir . --target dev \
+	    && uv run dbt run --profiles-dir . --target dev \
+	    && uv run dbt test --profiles-dir . --target dev
+	NZEG_MODE=local uv run streamlit run streamlit/app.py
+
+local-subset:            ## 1 年数据子集（中等规模验证）
+	uv run python scripts/download_generation.py --output data/raw/ --years 1
+	uv run python scripts/download_price.py --output data/raw/ --years 1 || true
+	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
+	cd dbt && uv run dbt seed --profiles-dir . --target dev \
+	    && uv run dbt run --profiles-dir . --target dev
+	NZEG_MODE=local uv run streamlit run streamlit/app.py
+
+dbt-test:                ## 单独跑 dbt test (DuckDB)
+	cd dbt && uv run dbt test --profiles-dir . --target dev
+
+# ==================== Cloud 模式（Snowflake + Airflow Docker） ====================
+cloud-up:                ## 启动 Airflow (Docker Compose)
+	docker compose up -d --build
+
+cloud-backfill:          ## 触发 Airflow 回填（2016-01-01 至上月）
+	docker compose exec airflow-scheduler airflow dags backfill \
+	    nz_electricity_v2 \
+	    --start-date 2016-01-01 \
+	    --end-date $(shell date -v-1m +%Y-%m-01)
+
+cloud-dbt-full:          ## Snowflake 全量刷新（首次回填后调用一次）
+	cd dbt && uv run dbt seed --profiles-dir . --target prod \
+	    && uv run dbt run --profiles-dir . --target prod --full-refresh \
+	    && uv run dbt test --profiles-dir . --target prod
+
+cloud-dashboard:         ## Streamlit → Snowflake
+	NZEG_MODE=cloud uv run streamlit run streamlit/app.py
+
+# ==================== V1 legacy (compose lifecycle) ====================
 build:
 	docker compose build
 

@@ -15,8 +15,11 @@ profiles.yml
 # MacOS
 .DS_Store
 
-# Local data directory
+# Local data directory (CSVs, DuckDB file, parquet diff artifacts)
 data/
+*.duckdb
+*.duckdb.wal
+*.parquet
 
 # Python
 __pycache__/

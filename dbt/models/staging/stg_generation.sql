@@ -4,59 +4,52 @@
     )
 }}
 
-WITH source AS (
-    SELECT * FROM {{ source('raw', 'raw_generation') }}
-),
+/*
+    Output schema unchanged from V1 — only the FLATTEN-vs-UNNEST machinery
+    is now factored into the unpivot_trading_periods macro so the model
+    compiles on both Snowflake and DuckDB.
 
-flattened AS (
-    SELECT
-        s.site_code,
-        s.poc_code,
-        s.nwk_code,
-        s.gen_code,
-        s.fuel_code AS raw_fuel_code,
-        s.tech_code,
-        s.trading_date::date AS trading_date,
-        s.trading_month,
-        s._source_file_modified_at,
-        f.index + 1 AS trading_period,
-        NULLIF(NULLIF(f.value::string, CHR(0)), '') AS tp_value_raw
-    FROM source AS s,
-        LATERAL FLATTEN(
-            input => ARRAY_CONSTRUCT(
-                s.tp1, s.tp2, s.tp3, s.tp4, s.tp5,
-                s.tp6, s.tp7, s.tp8, s.tp9, s.tp10,
-                s.tp11, s.tp12, s.tp13, s.tp14, s.tp15,
-                s.tp16, s.tp17, s.tp18, s.tp19, s.tp20,
-                s.tp21, s.tp22, s.tp23, s.tp24, s.tp25,
-                s.tp26, s.tp27, s.tp28, s.tp29, s.tp30,
-                s.tp31, s.tp32, s.tp33, s.tp34, s.tp35,
-                s.tp36, s.tp37, s.tp38, s.tp39, s.tp40,
-                s.tp41, s.tp42, s.tp43, s.tp44, s.tp45,
-                s.tp46, s.tp47, s.tp48, s.tp49, s.tp50
-            )
-        ) AS f
+    The macro is called with TP1-TP50 to cover NZ DST (spring-forward day
+    has 46 TPs, autumn-back day has 50; missing TPs arrive as NULL and are
+    dropped by the macro's WHERE).
+*/
+
+{% set tp_cols = [] %}
+{% for i in range(1, 51) %}
+    {% do tp_cols.append({'index': i, 'col': 'tp' ~ i}) %}
+{% endfor %}
+
+WITH unpivoted AS (
+    {{ unpivot_trading_periods(
+         source('raw', 'raw_generation'),
+         tp_cols,
+         [
+             'site_code', 'poc_code', 'nwk_code', 'gen_code',
+             'fuel_code AS raw_fuel_code', 'tech_code',
+             'trading_date', 'trading_month', '_source_file_modified_at'
+         ],
+         value_col_name='tp_value_raw'
+       ) }}
 ),
 
 with_fuel AS (
     SELECT
-        fl.site_code,
-        fl.poc_code,
-        fl.nwk_code,
-        fl.gen_code,
-        fl.raw_fuel_code,
+        u.site_code,
+        u.poc_code,
+        u.nwk_code,
+        u.gen_code,
+        u.raw_fuel_code,
         fc.fuel_type,
         fc.is_renewable,
-        fl.tech_code,
-        fl.trading_date,
-        fl.trading_month,
-        fl.trading_period,
-        fl.tp_value_raw::integer AS generation_kwh,
-        fl._source_file_modified_at
-    FROM flattened AS fl
+        u.tech_code,
+        CAST(u.trading_date AS DATE) AS trading_date,
+        u.trading_month,
+        u.tp_number AS trading_period,
+        CAST(u.tp_value_raw AS INTEGER) AS generation_kwh,
+        u._source_file_modified_at
+    FROM unpivoted AS u
     INNER JOIN {{ ref('fuel_codes') }} AS fc
-        ON fl.raw_fuel_code = fc.raw_fuel_code
-    WHERE fl.tp_value_raw IS NOT NULL
+        ON u.raw_fuel_code = fc.raw_fuel_code
 ),
 
 deduped AS (

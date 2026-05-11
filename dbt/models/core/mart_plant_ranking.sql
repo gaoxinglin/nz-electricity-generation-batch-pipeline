@@ -2,7 +2,7 @@
     config(
         materialized='incremental',
         unique_key=['year_month', 'site_code'],
-        incremental_strategy='merge'
+        incremental_strategy='delete+insert'
     )
 }}
 
@@ -16,7 +16,7 @@ WITH monthly_generation AS (
 
     {% if is_incremental() %}
         WHERE trading_month >= (
-            SELECT TO_CHAR(DATEADD(MONTH, -1, TO_DATE(MAX(year_month) || '01', 'YYYYMMDD')), 'YYYYMM')  -- noqa: RF02
+            SELECT {{ yyyymm_minus_one_month('MAX(year_month)') }}
             FROM {{ this }}
         )
     {% endif %}

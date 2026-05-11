@@ -2,7 +2,7 @@
     config(
         materialized='incremental',
         unique_key=['trading_date', 'fuel_type'],
-        incremental_strategy='merge'
+        incremental_strategy='delete+insert'
     )
 }}
 
@@ -15,7 +15,7 @@ SELECT
 FROM {{ ref('fct_generation') }}
 
 {% if is_incremental() %}
-    WHERE trading_date >= (SELECT DATEADD(DAY, -3, MAX(trading_date)) FROM {{ this }})  -- noqa: RF02
+    WHERE trading_date >= (SELECT {{ dbt.dateadd('day', -3, 'MAX(trading_date)') }} FROM {{ this }})  -- noqa: RF02
 {% endif %}
 
 GROUP BY trading_date, fuel_type

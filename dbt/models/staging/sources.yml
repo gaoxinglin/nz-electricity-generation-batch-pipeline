@@ -2,8 +2,8 @@ version: 2
 
 sources:
   - name: raw
-    database: "{{ env_var('SNOWFLAKE_DATABASE', 'NZ_ELECTRICITY_DB') }}"
-    schema: RAW
+    database: "{{ target.database }}"
+    schema: "{{ 'raw' if target.type == 'duckdb' else 'RAW' }}"
     freshness:
       warn_after:
         count: 35
