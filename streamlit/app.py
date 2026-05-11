@@ -41,6 +41,9 @@ pg = st.navigation({
         st.Page("pages/renewable_price.py", title="Renewable vs Price", icon="🌿"),
         st.Page("pages/island_spread.py",   title="Island Spread",    icon="🏝️"),
     ],
+    "Operations": [
+        st.Page("pages/pipeline_health.py", title="Pipeline Health",  icon="🩺"),
+    ],
 })
 
 import os

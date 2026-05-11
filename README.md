@@ -160,6 +160,25 @@ See `docs/plans/PRD_*` "变更记录" table rows 5.1-impl through 5.4-impl for t
 
 ---
 
+## Observability & SLOs
+
+Pipeline observability is exposed via the **🩺 Pipeline Health** Streamlit page (`pages/pipeline_health.py`), backed by `fct_dbt_run` (Phase 5 Tier 1) and `mart_warehouse_cost` (Tier 2, SF only).
+
+| SLO | Target | Source signal |
+|---|---|---|
+| Data freshness | Latest successful `model` run ≤ **7 days** old | `fct_dbt_run` (last `is_success`) |
+| 30-day model success rate | ≥ **95 %** | `fct_dbt_run` rolling 30 days |
+| 30-day test pass rate | ≥ **99 %** | `fct_dbt_run.status='pass'` ratio over 30 days |
+| Cost (SF only) | informational — track `usd_estimated` 30-day total | `mart_warehouse_cost` (ACCOUNT_USAGE) |
+
+Each `dbt run` / `dbt test` writes `target/run_results.json`; `scripts/ingest_dbt_artifacts.py` flattens that into `raw.raw_dbt_run`. The v2 DAG runs the ingester via a `TriggerRule.ALL_DONE` task so failed runs are captured too. Local-mode Makefile picks it up the same way.
+
+Slack alerting (optional): set `SLACK_WEBHOOK_URL` env var — the v2 DAG's `on_failure_callback` posts a structured message per failed task. Without the env var, falls back to Airflow's `email_on_failure`.
+
+Tier 2/3 items (anomaly detection, OpenTelemetry, proper SLO burn rate) are spec-only — see PRD §13.4 + §11.
+
+---
+
 ## Testing
 
 ```bash

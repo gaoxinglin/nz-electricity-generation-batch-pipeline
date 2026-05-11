@@ -10,6 +10,9 @@ demo:                    ## ~60s 启动：下 1 个月数据 → DuckDB → Stre
 	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev
+	uv run python scripts/ingest_dbt_artifacts.py \
+	    --artifact dbt/target/run_results.json \
+	    --target duckdb --db data/nzeg.duckdb
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 # ==================== Local 模式 ====================
@@ -22,6 +25,9 @@ local-full:              ## 一键全流程（全量历史 2016-至今）
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev \
 	    && uv run dbt test --profiles-dir . --target dev
+	uv run python scripts/ingest_dbt_artifacts.py \
+	    --artifact dbt/target/run_results.json \
+	    --target duckdb --db data/nzeg.duckdb
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 local-subset:            ## 1 年数据子集（中等规模验证）
@@ -30,6 +36,9 @@ local-subset:            ## 1 年数据子集（中等规模验证）
 	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev
+	uv run python scripts/ingest_dbt_artifacts.py \
+	    --artifact dbt/target/run_results.json \
+	    --target duckdb --db data/nzeg.duckdb
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 dbt-test:                ## 单独跑 dbt test (DuckDB)

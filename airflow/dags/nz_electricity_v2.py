@@ -336,10 +336,59 @@ def nsp_load(**kwargs) -> None:
 # ─── DAG ──────────────────────────────────────────────────────────────
 
 
+def slack_alert(context) -> None:
+    """on_failure_callback — POST a concise failure summary to Slack.
+
+    Webhook URL via SLACK_WEBHOOK_URL env var. If unset, this is a no-op
+    (email_on_failure stays as the fallback channel).
+    """
+    webhook = os.environ.get("SLACK_WEBHOOK_URL")
+    if not webhook:
+        return
+    import json
+    import urllib.request
+
+    ti = context.get("task_instance")
+    dag_id = context.get("dag").dag_id if context.get("dag") else "?"
+    task_id = ti.task_id if ti else "?"
+    run_id = context.get("run_id", "?")
+    exception = context.get("exception", "")
+    log_url = ti.log_url if ti and hasattr(ti, "log_url") else ""
+
+    payload = {
+        "text": f":rotating_light: *{dag_id}.{task_id}* failed",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"*DAG:* `{dag_id}`\n"
+                        f"*Task:* `{task_id}`\n"
+                        f"*Run:* `{run_id}`\n"
+                        f"*Exception:* ```{str(exception)[:500]}```\n"
+                        f"{f'<{log_url}|View logs>' if log_url else ''}"
+                    ),
+                },
+            }
+        ],
+    }
+    try:
+        req = urllib.request.Request(
+            webhook,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as exc:  # don't let alerting break the DAG
+        logger.warning("slack alert failed: %s", exc)
+
+
 default_args = {
     "owner": "airflow",
     "retries": 2,
     "retry_delay": timedelta(minutes=5),
+    "on_failure_callback": slack_alert,
 }
 
 with DAG(
@@ -404,9 +453,22 @@ with DAG(
         pool="dbt_pool",
     )
 
+    # Ingest dbt artifacts → raw_dbt_run (Tier-1 observability).
+    # Runs after every test execution regardless of test pass/fail so we
+    # capture failure runs too (trigger_rule=ALL_DONE).
+    t_ingest_artifacts = BashOperator(
+        task_id="ingest_dbt_artifacts",
+        bash_command=(
+            "python /opt/airflow/scripts/ingest_dbt_artifacts.py "
+            "--artifact /opt/dbt/target/run_results.json "
+            "--target snowflake"
+        ),
+        trigger_rule=TriggerRule.ALL_DONE,
+    )
+
     # Wiring
     g_download >> g_validate >> g_upload >> g_load
     p_download >> p_validate >> p_upload >> p_load
     n_download >> n_upload >> n_load
 
-    [g_load, p_load, n_load] >> t_check_dbt >> t_dbt_run >> t_dbt_test
+    [g_load, p_load, n_load] >> t_check_dbt >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts

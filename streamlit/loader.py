@@ -205,3 +205,50 @@ def load_renewable_price_impact() -> pd.DataFrame:
     """)
     df["trading_date"] = pd.to_datetime(df["trading_date"])
     return df
+
+
+# ─── Observability (Phase 5) ──────────────────────────────────────────
+
+
+def load_dbt_runs() -> pd.DataFrame:
+    """fct_dbt_run: one row per (invocation, node) — pipeline observability."""
+    try:
+        df = _q(f"""
+            SELECT
+                invocation_id, generated_at, generated_date,
+                dbt_version, node_unique_id, node_type, node_name,
+                status, execution_time_seconds, failures, is_success,
+                invocation_rank_desc
+            FROM {_analytics()}.fct_dbt_run
+            ORDER BY generated_at DESC
+        """)
+    except Exception as exc:
+        # First run before any artifact ingest: return empty frame with right schema
+        return pd.DataFrame(columns=[
+            "invocation_id", "generated_at", "generated_date", "dbt_version",
+            "node_unique_id", "node_type", "node_name", "status",
+            "execution_time_seconds", "failures", "is_success",
+            "invocation_rank_desc",
+        ])
+    df["generated_at"] = pd.to_datetime(df["generated_at"])
+    df["generated_date"] = pd.to_datetime(df["generated_date"])
+    return df
+
+
+def load_warehouse_cost() -> pd.DataFrame | None:
+    """mart_warehouse_cost (SF only). Returns None on DuckDB target."""
+    if _mode() == "local":
+        return None
+    try:
+        df = _q(f"""
+            SELECT usage_date, warehouse_name, credits_used,
+                   credits_used_compute, credits_used_cloud_services,
+                   usd_estimated, total_queries, failed_queries,
+                   avg_query_seconds
+            FROM {_analytics()}.mart_warehouse_cost
+            ORDER BY usage_date DESC, warehouse_name
+        """)
+    except Exception:
+        return None
+    df["usage_date"] = pd.to_datetime(df["usage_date"])
+    return df

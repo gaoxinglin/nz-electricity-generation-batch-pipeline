@@ -306,6 +306,41 @@ models:
               min_value: 0
               max_value: 100
 
+  - name: fct_dbt_run
+    description: >
+      One row per (invocation_id, node_unique_id). Powers Pipeline Health
+      observability dashboard.
+    columns:
+      - name: invocation_id
+        tests:
+          - not_null
+      - name: node_unique_id
+        tests:
+          - not_null
+      - name: node_type
+        tests:
+          - accepted_values:
+              values: ['model', 'test', 'seed', 'snapshot', 'operation', 'source']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - invocation_id
+            - node_unique_id
+
+  - name: mart_warehouse_cost
+    description: >
+      Daily warehouse cost from Snowflake ACCOUNT_USAGE (SF target only).
+      Disabled on DuckDB.
+    config:
+      enabled: "{{ target.type == 'snowflake' }}"
+    columns:
+      - name: usage_date
+        tests:
+          - not_null
+      - name: warehouse_name
+        tests:
+          - not_null
+
   - name: mart_seasonal_pattern
     description: >
       Seasonal generation pattern. NZ seasons: Summer Dec-Feb,

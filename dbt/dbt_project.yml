@@ -11,6 +11,7 @@ vars:
                                     # to cover interim→final price corrections.
                                     # Monthly final re-run uses --vars '{lookback_days: 32}'.
   pricing_regime_cutover: '2022-11-01'  # ex-post → real-time
+  snowflake_usd_per_credit: 2.0         # Standard tier; override per account/region
 
 model-paths: ["models"]
 seed-paths: ["seeds"]

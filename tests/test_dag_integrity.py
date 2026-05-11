@@ -83,8 +83,8 @@ def test_v2_dag_task_set(dag_v2):
         "price_download", "price_validate", "price_upload", "price_load",
         # nsp branch
         "nsp_download", "nsp_upload", "nsp_load",
-        # dbt
-        "check_run_dbt", "run_dbt", "run_dbt_tests",
+        # dbt + observability (Phase 5)
+        "check_run_dbt", "run_dbt", "run_dbt_tests", "ingest_dbt_artifacts",
     }
     actual = {t.task_id for t in dag_v2.tasks}
     assert actual == expected, (
