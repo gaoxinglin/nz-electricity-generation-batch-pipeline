@@ -180,6 +180,132 @@ models:
             - trading_date
             - tp_number
 
+  - name: dim_node
+    description: >
+      POC-grain dimension from NSP. Type 1; latest current row per POC.
+    columns:
+      - name: node_id
+        tests:
+          - not_null
+          - unique
+      - name: poc_code
+        tests:
+          - not_null
+          - unique
+      - name: island
+        tests:
+          - accepted_values:
+              values: ['NI', 'SI']
+              config:
+                severity: warn
+
+  - name: dim_date
+    description: >
+      Day grain 2016-01-01 .. 2030-12-31. NIWA seasons, NZ public holidays.
+    columns:
+      - name: date_key
+        tests:
+          - not_null
+          - unique
+      - name: trading_date
+        tests:
+          - not_null
+          - unique
+      - name: season
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['Summer', 'Autumn', 'Winter', 'Spring']
+
+  - name: dim_fuel
+    description: "Canonical fuel-type dimension (BOOL_OR of is_renewable across raw aliases)."
+    columns:
+      - name: fuel_id
+        tests:
+          - not_null
+          - unique
+      - name: fuel_type
+        tests:
+          - not_null
+          - unique
+
+  - name: int_generation_by_poc
+    description: "Generation aggregated to POC × date × tp × fuel grain."
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: fuel_type
+        tests:
+          - not_null
+      - name: generation_kwh
+        tests:
+          - not_null
+
+  - name: mart_price_daily
+    description: "Daily POC price summary, joined to dim_node for island/region."
+    columns:
+      - name: trading_date
+        tests:
+          - not_null
+      - name: poc_code
+        tests:
+          - not_null
+      - name: avg_price_all
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+
+  - name: mart_price_spike_events
+    description: "Price spike events (> threshold) with co-located fuel mix."
+    columns:
+      - name: trading_date
+        tests:
+          - not_null
+      - name: poc_code
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 300
+              max_value: 20000
+
+  - name: mart_renewable_price_impact
+    description: "Per (POC × date × tp): renewable share vs wholesale price."
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+      - name: renewable_pct
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+
   - name: mart_seasonal_pattern
     description: >
       Seasonal generation pattern. NZ seasons: Summer Dec-Feb,

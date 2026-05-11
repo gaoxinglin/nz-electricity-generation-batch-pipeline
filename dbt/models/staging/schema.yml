@@ -89,3 +89,21 @@ models:
     description: >
       Positive-spike (> var price_spike_threshold) and negative-price
       (< var negative_price_threshold) rows. Monitoring view only.
+
+  - name: stg_nsp
+    description: >
+      Current-row NSP snapshot. Trust source values (no region normalisation).
+      Coordinates are NZTM (not lat/lng).
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: nsp_code
+        tests:
+          - not_null
+      - name: island
+        tests:
+          - accepted_values:
+              values: ['NI', 'SI']
+              config:
+                severity: warn

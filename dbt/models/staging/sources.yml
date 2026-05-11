@@ -18,6 +18,11 @@ sources:
           Raw EMI generation data loaded via COPY INTO.
           59 columns: 57 CSV columns (all VARCHAR) + trading_month (VARCHAR)
           + _source_file_modified_at (TIMESTAMP_NTZ).
+      - name: raw_nsp
+        description: >
+          Raw NSP (Network Supply Points) table snapshot — 27 cols, ~2.5k rows.
+          Daily-dated source file; loaded as full snapshot. Coordinates are
+          NZTM (NZ Transverse Mercator), not lat/lng — PRD §2.3 imprecise.
       - name: raw_price
         description: >
           Raw EMI Final Energy Prices.

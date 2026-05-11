@@ -8,8 +8,7 @@ partial run never leaves the warehouse half-loaded.
 Currently handles:
   - {YYYYMM}_Generation_MD.csv      → raw.raw_generation
   - {YYYYMM}_FinalEnergyPrices.csv  → raw.raw_price
-
-Phase 2 will add: NetworkSupplyPointsTable.csv → raw_nsp
+  - NetworkSupplyPointsTable.csv    → raw.raw_nsp (full reload — small file)
 
 Schema parity with Snowflake (V1):
   raw_generation has 59 columns, all VARCHAR, named lowercase:
@@ -37,6 +36,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 GENERATION_FILENAME_RE = re.compile(r"^(\d{6})_Generation_MD\.csv$")
 PRICE_FILENAME_RE = re.compile(r"^(\d{6})_FinalEnergyPrices\.csv$")
+NSP_FILENAME = "NetworkSupplyPointsTable.csv"
 
 # EMI Final Energy Prices: 4 source cols (observed 2026-05; PRD §2.3 originally
 # claimed 7 — Island/IsProxyPriceFlag/PublishDateTime do not exist in the file).
@@ -193,6 +193,42 @@ def load_all_generation(db_path: Path, source_dir: Path) -> None:
         conn.close()
 
 
+def load_nsp(db_path: Path, source_dir: Path) -> None:
+    """Full-reload (DELETE all + INSERT) the NSP table.
+
+    NSP is a small daily snapshot (~2.5k rows × 27 cols ≈ 400KB). We treat it
+    as a current snapshot — full reload every refresh keeps things trivial.
+    All columns kept as VARCHAR for staging-layer cast.
+    """
+    csv_path = source_dir / NSP_FILENAME
+    if not csv_path.exists():
+        logger.warning("no NSP file at %s — skipping", csv_path)
+        return
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    conn = duckdb.connect(str(db_path))
+    try:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            conn.execute("DROP TABLE IF EXISTS raw.raw_nsp")
+            conn.execute(
+                """
+                CREATE TABLE raw.raw_nsp AS
+                SELECT *, ? AS _source_file_modified_at
+                FROM read_csv(?, header=true, all_varchar=true)
+                """,
+                [file_mtime, str(csv_path)],
+            )
+            row_count = conn.execute("SELECT count(*) FROM raw.raw_nsp").fetchone()[0]
+            conn.execute("COMMIT")
+            logger.info("loaded NSP — %d rows", row_count)
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+
+
 def load_all_price(db_path: Path, source_dir: Path) -> None:
     files = sorted(
         f for f in source_dir.iterdir()
@@ -227,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
 
     load_all_generation(Path(args.db), Path(args.source))
     load_all_price(Path(args.db), Path(args.source))
+    load_nsp(Path(args.db), Path(args.source))
     return 0
 
 
