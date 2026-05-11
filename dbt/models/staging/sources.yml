@@ -18,3 +18,10 @@ sources:
           Raw EMI generation data loaded via COPY INTO.
           59 columns: 57 CSV columns (all VARCHAR) + trading_month (VARCHAR)
           + _source_file_modified_at (TIMESTAMP_NTZ).
+      - name: raw_price
+        description: >
+          Raw EMI Final Energy Prices.
+          Source CSV has 4 columns (observed 2026-05; PRD §2.3's claim of
+          7 was incorrect — Island/IsProxyPriceFlag/PublishDateTime do not
+          exist in the actual file). raw_price table = 4 source cols
+          (all VARCHAR, lowercased) + trading_month + _source_file_modified_at.

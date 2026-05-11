@@ -1,7 +1,16 @@
 name: nz_electricity
-version: '1.0.0'
+version: '2.0.0'
 
 profile: nz_electricity
+
+vars:
+  price_spike_threshold: 300        # $/MWh positive spike (audit)
+  negative_price_threshold: 0       # $/MWh negative price (audit)
+  bymonth_cutoff: '9999-12'         # ByMonth still available 2026-05; effectively off
+  lookback_days: 3                  # fct_price incremental: re-process last N days
+                                    # to cover interim→final price corrections.
+                                    # Monthly final re-run uses --vars '{lookback_days: 32}'.
+  pricing_regime_cutover: '2022-11-01'  # ex-post → real-time
 
 model-paths: ["models"]
 seed-paths: ["seeds"]
@@ -19,6 +28,9 @@ models:
   nz_electricity:
     staging:
       +schema: raw
+      +materialized: table
+    intermediate:
+      +schema: analytics
       +materialized: table
     core:
       +schema: analytics

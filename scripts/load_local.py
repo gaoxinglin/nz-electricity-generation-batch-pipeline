@@ -6,10 +6,10 @@ Each file is loaded in its own transaction (BEGIN / COMMIT / ROLLBACK), so a
 partial run never leaves the warehouse half-loaded.
 
 Currently handles:
-  - {YYYYMM}_Generation_MD.csv  → raw_generation
+  - {YYYYMM}_Generation_MD.csv      → raw.raw_generation
+  - {YYYYMM}_FinalEnergyPrices.csv  → raw.raw_price
 
-Phase 1 will add: {YYYYMM}_FinalEnergyPrices.csv → raw_price
-Phase 2 will add: NetworkSupplyPointsTable.csv  → raw_nsp
+Phase 2 will add: NetworkSupplyPointsTable.csv → raw_nsp
 
 Schema parity with Snowflake (V1):
   raw_generation has 59 columns, all VARCHAR, named lowercase:
@@ -36,6 +36,13 @@ logger = logging.getLogger("load_local")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 GENERATION_FILENAME_RE = re.compile(r"^(\d{6})_Generation_MD\.csv$")
+PRICE_FILENAME_RE = re.compile(r"^(\d{6})_FinalEnergyPrices\.csv$")
+
+# EMI Final Energy Prices: 4 source cols (observed 2026-05; PRD §2.3 originally
+# claimed 7 — Island/IsProxyPriceFlag/PublishDateTime do not exist in the file).
+PRICE_RAW_COLUMNS = [
+    "trading_date", "trading_period", "point_of_connection", "dollars_per_mwh",
+]
 
 # EMI Generation_MD column order (verified from the file header — index 4 is
 # Fuel_Code, index 6 is Trading_date, indices 7-56 are TP1-TP50).
@@ -106,6 +113,60 @@ def load_generation_file(
         raise
 
 
+def ensure_raw_price(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS raw.raw_price (
+            trading_date VARCHAR,
+            trading_period VARCHAR,
+            point_of_connection VARCHAR,
+            dollars_per_mwh VARCHAR,
+            trading_month VARCHAR,
+            _source_file_modified_at TIMESTAMP
+        )
+        """
+    )
+
+
+def load_price_file(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    trading_month: str,
+) -> int:
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute("DELETE FROM raw.raw_price WHERE trading_month = ?", [trading_month])
+        conn.execute(
+            f"""
+            INSERT INTO raw.raw_price
+            SELECT
+                {", ".join(PRICE_RAW_COLUMNS)},
+                ? AS trading_month,
+                ? AS _source_file_modified_at
+            FROM read_csv(
+                ?,
+                header=true,
+                all_varchar=true,
+                columns={{
+                    {", ".join(f"'{c}': 'VARCHAR'" for c in PRICE_RAW_COLUMNS)}
+                }}
+            )
+            """,
+            [trading_month, file_mtime, str(csv_path)],
+        )
+        row_count = conn.execute(
+            "SELECT count(*) FROM raw.raw_price WHERE trading_month = ?",
+            [trading_month],
+        ).fetchone()[0]
+        conn.execute("COMMIT")
+        return row_count
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 def load_all_generation(db_path: Path, source_dir: Path) -> None:
     files = sorted(
         f for f in source_dir.iterdir()
@@ -132,6 +193,32 @@ def load_all_generation(db_path: Path, source_dir: Path) -> None:
         conn.close()
 
 
+def load_all_price(db_path: Path, source_dir: Path) -> None:
+    files = sorted(
+        f for f in source_dir.iterdir()
+        if PRICE_FILENAME_RE.match(f.name)
+    )
+    if not files:
+        logger.warning("no FinalEnergyPrices files found under %s", source_dir)
+        return
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    try:
+        ensure_raw_price(conn)
+        total = 0
+        for f in files:
+            match = PRICE_FILENAME_RE.match(f.name)
+            assert match is not None
+            ym = match.group(1)
+            rows = load_price_file(conn, f, ym)
+            logger.info("loaded %s — %d rows", f.name, rows)
+            total += rows
+        logger.info("done — %d files, %d total rows in raw.raw_price", len(files), total)
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Load EMI CSVs into local DuckDB")
     p.add_argument("--db", required=True, help="Path to .duckdb file (created if missing)")
@@ -139,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     load_all_generation(Path(args.db), Path(args.source))
+    load_all_price(Path(args.db), Path(args.source))
     return 0
 
 

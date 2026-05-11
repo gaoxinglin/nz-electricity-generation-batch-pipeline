@@ -45,3 +45,47 @@ models:
     description: >
       TP1-TP46 NULLs only (anomalous). TP47-50 NULLs are expected (DST)
       and excluded from this view.
+
+  - name: stg_price
+    description: >
+      Typed Final Energy Prices. Source = 4 cols; pricing_regime derived
+      from trading_date vs var('pricing_regime_cutover'); is_proxy is a
+      FALSE placeholder (source flag absent post 2026-05).
+    columns:
+      - name: price_id
+        tests:
+          - not_null
+          - unique
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: trading_period
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -5000
+              max_value: 20000
+              config:
+                severity: warn
+      - name: pricing_regime
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['ex_post', 'real_time']
+      - name: is_proxy
+        tests:
+          - not_null
+
+  - name: stg_price_outlier_audit
+    description: >
+      Positive-spike (> var price_spike_threshold) and negative-price
+      (< var negative_price_threshold) rows. Monitoring view only.

@@ -114,6 +114,72 @@ models:
         tests:
           - not_null
 
+  - name: fct_price
+    description: >
+      One row per (poc_code, trading_date, tp_number). price_nzd_mwh in $/MWh.
+      Incremental delete+insert with `lookback_days` re-process window so
+      interim → final corrections overwrite cleanly.
+    columns:
+      - name: date_key
+        description: "INT YYYYMMDD; future dim_date join key."
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: poc_code
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -5000
+              max_value: 20000
+              config:
+                severity: warn
+      - name: pricing_regime
+        tests:
+          - accepted_values:
+              values: ['ex_post', 'real_time']
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+
+  - name: int_price_daily
+    description: >
+      Grain poc_code × trading_date × tp_number, with daily POC-level mean
+      (avg_price_all and avg_price_non_proxy) as window aggregates on each
+      TP row. Designed to join cleanly with int_generation_by_poc in Phase 2.
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: avg_price_all
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+
   - name: mart_seasonal_pattern
     description: >
       Seasonal generation pattern. NZ seasons: Summer Dec-Feb,
