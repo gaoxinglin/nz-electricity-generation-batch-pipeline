@@ -316,6 +316,77 @@ resource "snowflake_table" "raw_generation" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_price (6 columns) — Phase 1
+# 4 source columns (all VARCHAR; observed 2026-05) + trading_month
+# + _source_file_modified_at. NB: PRD §2.3 listed 7 columns originally
+# but Island/IsProxyPriceFlag/PublishDateTime do not exist in the EMI file.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_price" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_PRICE"
+
+  column {
+    name = "TRADING_DATE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_PERIOD"
+    type = "VARCHAR"
+  }
+  column {
+    name = "POINT_OF_CONNECTION"
+    type = "VARCHAR"
+  }
+  column {
+    name = "DOLLARS_PER_MWH"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_MONTH"
+    type = "VARCHAR"
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
+# Table: raw_nsp (28 columns) — Phase 2
+# The 27 published columns are kept as VARCHAR; stg_nsp does the cast +
+# Current-flag filter. + _source_file_modified_at.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_nsp" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_NSP"
+
+  dynamic "column" {
+    for_each = [
+      "CURRENT_FLAG", "NSP", "NSP_REPLACED_BY", "POC_CODE",
+      "NETWORK_PARTICIPANT", "EMBEDDED_UNDER_POC_CODE",
+      "EMBEDDED_UNDER_NETWORK_PARTICIPANT", "RECONCILIATION_TYPE",
+      "X_FLOW", "I_FLOW", "DESCRIPTION", "NZTM_EASTING", "NZTM_NORTHING",
+      "NETWORK_REPORTING_REGION_ID", "NETWORK_REPORTING_REGION", "ZONE",
+      "ISLAND", "START_DATE", "START_TP", "END_DATE", "END_TP",
+      "SB_ICP", "BALANCING_CODE", "MEP", "RESPONSIBLE_PARTICIPANT",
+      "CERTIFICATION_EXPIRY", "METERING_INFORMATION_EXEMPTION_EXPIRY_DATE",
+    ]
+    content {
+      name = column.value
+      type = "VARCHAR"
+    }
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Roles & Users
 # ──────────────────────────────────────────────
 

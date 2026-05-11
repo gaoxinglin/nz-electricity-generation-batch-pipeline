@@ -1,13 +1,48 @@
-# NZ Electricity Generation — Batch Data Pipeline
+# NZ Electricity Wholesale Market — V2 Pipeline
 
-**Automated ELT pipeline** that ingests New Zealand's monthly electricity generation data from the [EMI website](https://www.emi.ea.govt.nz/), transforms it through a dimensional model in Snowflake, and serves an interactive dashboard answering four business questions.
+**ELT pipeline** ingesting NZ electricity **generation, wholesale prices, and network supply points** from EMI, modelling them into a Kimball-style star schema, and serving an interactive Streamlit dashboard. Built to run in two modes from the same dbt codebase:
+
+| | 🟢 **Local** | ☁️ **Cloud** |
+|---|---|---|
+| Warehouse | DuckDB (local file) | Snowflake |
+| Orchestrator | Makefile | Airflow (Docker) |
+| Object store | `data/raw/` | AWS S3 |
+| dbt profile | `dev` | `prod` |
+| Use case | Demo / development / interview | Production-like run |
+| Setup time | ~60s (`make demo`) | ~30 min (Snowflake trial + terraform) |
 
 | | |
 |---|---|
-| **Stack** | Airflow · dbt · Snowflake · S3 · Terraform · Streamlit |
-| **Data** | 10 years, ~5M rows, 123 monthly CSV files |
-| **Pipeline** | 7-task DAG, idempotent, transactional loads |
-| **Dashboard** | [Live demo →](#) (5 pages, interactive filters) |
+| **Stack** | Airflow · dbt (Snowflake + DuckDB adapters) · Terraform · Streamlit · uv |
+| **Data sources** | EMI Generation_MD · Final Energy Prices · NSP Table |
+| **Pipeline** | V1 DAG (generation, 7 tasks) + V2 DAG (3 ingest branches + dbt) |
+| **Models** | 23 dbt models (4 cross-db macros) — 21 deploy in DuckDB |
+| **Dashboard** | 9 pages: 5 generation (V1) + 4 wholesale-price (V2) |
+
+---
+
+## Quick-start (local demo, no cloud account)
+
+```bash
+git clone <repo> && cd nz-electricity-generation-batch-pipeline
+uv sync                                     # installs dbt-core + duckdb + streamlit
+cp dbt/profiles.yml.example dbt/profiles.yml  # defaults to local DuckDB
+make demo                                   # ~60s: download 1 month → DuckDB → dbt run → Streamlit
+```
+
+`make demo` opens Streamlit at <http://localhost:8501>. To stop, Ctrl-C.
+
+Other Makefile targets (see `Makefile`):
+
+```
+make local-full     # full history (2016-→now) → DuckDB → dbt run + test → Streamlit
+make local-subset   # last 12 months only (faster than full)
+make dbt-test       # dbt test against DuckDB
+make cloud-up       # docker-compose up Airflow (needs .env + SF creds)
+make cloud-backfill # trigger Airflow backfill for full history
+make cloud-dbt-full # one-shot dbt seed+run+test on Snowflake prod
+make cloud-dashboard  # Streamlit against Snowflake
+```
 
 ---
 
@@ -15,239 +50,128 @@
 
 ```mermaid
 flowchart LR
-    EMI["EMI Website<br/>(monthly CSV)"]
-    AF_DL["download"]
-    AF_VAL["validate"]
-    AF_UP["upload"]
-    AF_LOAD["load"]
-    AF_DBT["dbt run"]
-    AF_TEST["dbt test"]
+    EMI["EMI<br/>(Generation_MD, FinalEnergyPrices, NSP)"]
 
-    S3["S3 Data Lake<br/>raw/"]
-    SF_RAW["Snowflake<br/>raw_generation"]
-    SF_STG["stg_generation<br/>(5M rows)"]
-    SF_DIM["dim_plant<br/>fct_generation"]
-    SF_MART["5 Mart Tables"]
-    DASH["Streamlit<br/>Dashboard"]
-
-    EMI --> AF_DL --> AF_VAL --> AF_UP --> S3
-    S3 --> AF_LOAD --> SF_RAW
-    SF_RAW --> AF_DBT --> SF_STG --> SF_DIM --> SF_MART
-    SF_MART --> AF_TEST
-    SF_MART --> DASH
-
-    subgraph Airflow DAG
-        AF_DL
-        AF_VAL
-        AF_UP
-        AF_LOAD
-        AF_DBT
-        AF_TEST
+    subgraph local["🟢 Local mode"]
+      direction TB
+      DLscripts["scripts/download_*.py"]
+      DLload["scripts/load_local.py"]
+      DUCK[("DuckDB<br/>nzeg.duckdb")]
     end
 
-    subgraph Snowflake
-        SF_RAW
-        SF_STG
-        SF_DIM
-        SF_MART
+    subgraph cloud["☁️ Cloud mode"]
+      direction TB
+      AF[/"Airflow DAG<br/>nz_electricity_v2"/]
+      S3["S3 (raw/)"]
+      SF[("Snowflake<br/>RAW + ANALYTICS")]
     end
+
+    EMI -.local.-> DLscripts --> DLload --> DUCK
+    EMI -.cloud.-> AF --> S3 --> SF
+
+    DBT["dbt<br/>(staging → intermediate → core → marts)"]
+    DUCK --> DBT
+    SF --> DBT
+    DBT --> ST["Streamlit (9 pages)"]
 ```
 
-### dbt Lineage
-
-```
-raw_generation
-  └── stg_generation (table — LATERAL FLATTEN, dedup, type cast)
-      ├── stg_generation_null_audit (view — TP1-46 NULL monitoring)
-      ├── dim_plant (table — Type 1 SCD, composite key)
-      └── fct_generation (table — generation_kwh)
-          ├── mart_generation_daily (incremental)
-          ├── mart_generation_monthly (incremental)
-          ├── mart_renewable_ratio (incremental)
-          ├── mart_plant_ranking (incremental)
-          └── mart_seasonal_pattern (table)
-```
-
-### Dashboard
-
-The Streamlit app answers four business questions:
-
-| Page | Question |
-|------|----------|
-| Overview | What is the current state of NZ electricity generation? |
-| Fuel Trends | How has NZ's generation mix evolved since 2016? |
-| Plant Ranking | Which power stations contribute the most each month? |
-| Renewable Share | How has NZ's renewable percentage changed over the decade? |
-| Seasonal Patterns | How does the generation mix differ between summer and winter? |
-
-#### Screenshots
-
-**Overview** — KPI cards with sparklines, fuel mix donut, 12-month stacked bar
-
-![Overview](docs/screenshots/01_overview.png)
-
-**Fuel Trends** — Stacked area chart with absolute/% toggle and 12-month rolling average
-
-![Fuel Trends](docs/screenshots/02_fuel_trends.png)
-
-**Plant Ranking** — Top-N horizontal bar with configurable N, full sortable table + CSV export
-
-![Plant Ranking](docs/screenshots/03_plant_ranking.png)
-
-**Renewable Share** — Full timeline with 12-month rolling average, annual bar chart + CSV export
-
-![Renewable Share](docs/screenshots/04_renewable_share.png)
-
-**Seasonal Patterns** — Season grouped bar and monthly heatmap by fuel type
-
-![Seasonal Patterns](docs/screenshots/05_seasonal_patterns.png)
+The dbt project compiles cleanly on both `dbt-duckdb` and `dbt-snowflake`. Cross-database SQL is encapsulated in macros under `dbt/macros/cross_db/` (`unpivot_trading_periods`, `generate_date_spine`, `day_of_week`, `yyyymm_minus_one_month`). See PRD §3 for the dual-run design.
 
 ---
 
-## Quick Start
+## Business questions
 
-```bash
-# 1. Clone and configure
-git clone https://github.com/<your-username>/nz-electricity-generation-batch-pipeline.git
-cd nz-electricity-generation-batch-pipeline
-cp .env.example .env        # fill in AWS + Snowflake credentials
+**Generation (V1)**
+1. Daily/monthly NZ generation by fuel type — `mart_generation_daily`, `mart_generation_monthly`
+2. Plant ranking by output — `mart_plant_ranking`
+3. Renewable-share trend over time — `mart_renewable_ratio`
+4. Seasonal patterns (NIWA southern-hemisphere seasons) — `mart_seasonal_pattern`
 
-# 2. Provision infrastructure
-cd terraform
-terraform init && terraform apply
-cd ..
-
-# 3. Start Airflow
-make build && make up        # Docker Compose: postgres + webserver + scheduler
-
-# 4. Backfill 10 years of data
-make backfill                # triggers DAG for each month 2016-01 → 2026-present
-make dbt-full                # dbt seed + run --full-refresh + test
-
-# 5. Open
-# Airflow UI:  http://localhost:8080  (admin / admin)
-# Dashboard:   deployed on Streamlit Community Cloud
-```
+**Wholesale Price (V2)**
+5. Per-POC daily wholesale price summary — `mart_price_daily`
+6. Spike events (>$300/MWh) with co-located fuel mix — `mart_price_spike_events`
+7. Renewable share vs price (non-monotonic relationship) — `mart_renewable_price_impact`
+8. NI vs SI island spread + HVDC link signal — derived from `mart_price_daily`
 
 ---
 
-## Project Structure
+## Repository structure
 
 ```
-nz-electricity-generation-batch-pipeline/
-├── .github/workflows/
-│   ├── ci.yml                              # Ruff + SQLFluff + dbt compile + pytest
-│   └── dbt-docs.yml                        # Generate & deploy dbt docs to GitHub Pages
+.
 ├── airflow/dags/
-│   └── nz_electricity_monthly.py           # 7-task DAG (download → validate → S3 → Snowflake → dbt)
+│   ├── nz_electricity_monthly.py        # V1 — generation only (kept as fallback)
+│   └── nz_electricity_v2.py             # V2 — generation || price + NSP + dbt
 ├── dbt/
-│   ├── models/staging/                     # stg_generation, null_audit, sources.yml
-│   ├── models/core/                        # dim_plant, fct_generation, 5 marts
-│   ├── tests/                              # Reconciliation + NULL anomaly tests
-│   └── seeds/fuel_codes.csv                # Fuel code standardisation lookup
-├── streamlit/                              # 5-page dashboard (multi-page app)
-│   ├── app.py                              #   navigation entry point
-│   ├── loader.py                           #   Snowflake queries + caching
-│   ├── charts.py                           #   shared color palette + chart helpers
-│   └── pages/                              #   one file per page
-├── terraform/                              # AWS S3 + Snowflake IaC
-├── tests/test_dag_integrity.py             # pytest: 7 tasks, dependencies
-├── docs/runbook.md                         # Failure diagnosis guide
-├── Dockerfile                              # Airflow + dbt (no Spark/Java)
-├── docker-compose.yml                      # Postgres + Airflow services
-└── Makefile                                # build, up, backfill, dbt-full
+│   ├── macros/cross_db/                 # 4 cross-database macros
+│   ├── models/staging/                  # stg_generation/price/nsp + audits
+│   ├── models/intermediate/             # int_price_daily, int_generation_by_poc
+│   ├── models/core/                     # dim_*, fct_*, mart_*
+│   ├── seeds/                           # fuel_codes, nz_public_holidays
+│   └── tests/                           # singular reconciliation tests
+├── scripts/
+│   ├── download_generation.py / download_price.py / download_nsp.py
+│   ├── load_local.py                    # DuckDB transactional CSV → table
+│   ├── load_snowflake_price.py          # SF COPY INTO helper for V2 DAG
+│   └── mini_poc_fixture.py              # Phase 0.0 cross-warehouse diff
+├── streamlit/
+│   ├── app.py                           # navigation
+│   ├── loader.py                        # dual-mode connector
+│   ├── charts.py                        # shared plot helpers
+│   └── pages/                           # 9 pages
+├── terraform/                           # SF database / schemas / roles, S3 bucket
+├── docs/runbook.md                      # ops playbook
+└── docs/plans/PRD_*                     # the spec
 ```
 
 ---
 
-## Technical Deep-Dive
+## Cloud-mode setup
 
-### Why These Choices?
+See PRD §16 (Implementer Bootstrap) for the day-1 onboarding flow:
 
-| Decision | Chosen | Why Not the Alternative |
-|----------|--------|------------------------|
-| No Spark | dbt SQL on Snowflake | ~100 MB total data — Spark adds Java dependency and demonstrates misunderstanding of when distributed processing is needed |
-| LATERAL FLATTEN over UNPIVOT | `ARRAY_CONSTRUCT` + `LATERAL FLATTEN` | UNPIVOT silently drops NULLs — DST and data quality NULLs disappear before monitoring can detect them |
-| Transactional COPY | `BEGIN; DELETE; COPY INTO; COMMIT;` | Without transaction, failure after DELETE leaves a month's data missing. Explicit ROLLBACK in except handler |
-| `EMPTY_FIELD_AS_NULL = TRUE` | File format setting + `NULLIF` | Without this, `CAST('' AS INTEGER)` throws on empty TP columns |
-| Composite key `(site_code, gen_code)` | Both in surrogate key | gen_code appears unique but EMI doesn't guarantee it — defensive against collisions |
-| stg as table, not view | Materialise once | FLATTEN expands 1 → ~48 rows. As view, 5 marts each re-trigger full expansion |
-| kWh at fact, GWh at mart | Precision at fact level | National monthly ~3-4 TWh; GWh is the readable reporting unit |
-| mart_renewable_ratio from fct | Flat DAG | Avoids mart-to-mart dependency and cascading failures |
-| Season year: Dec → next year | NZ meteorological convention | Dec/Jan/Feb grouped as contiguous season |
+1. Snowflake trial account (ap-southeast-2 region).
+2. `cp .env.example .env` and fill `SNOWFLAKE_*`, `AWS_*`, `S3_BUCKET_NAME`.
+3. `cd terraform && terraform apply` — creates DB / schemas / warehouses / RBAC / S3 bucket / IAM user.
+4. `cp dbt/profiles.yml.example dbt/profiles.yml`; the `prod` target reads env vars.
+5. `make cloud-up && make cloud-backfill`.
 
-### Data Flow Detail
-
-1. **Download**: Airflow `PythonOperator` fetches CSV from EMI. 404 → `AirflowSkipException` (no alert). Exponential backoff on 5xx.
-2. **Validate**: Schema check (57 columns), content validation (fuel codes, numeric TPs, date format). Fail-early on unknown fuel codes.
-3. **Upload to S3**: Raw CSV stored at `s3://<bucket>/raw/generation_YYYYMM.csv`.
-4. **Load to Snowflake**: Transactional `DELETE WHERE trading_month = X` + `COPY INTO` with `METADATA$FILE_LAST_MODIFIED`. Explicit ROLLBACK on failure.
-5. **dbt Transform**: `stg_generation` unpivots 46 trading periods via LATERAL FLATTEN, casts types, standardises fuel codes via INNER JOIN to seed, deduplicates with `ROW_NUMBER()`.
-6. **dbt Test**: not_null, unique, accepted_values, range checks, NULL anomaly ratio, cross-layer reconciliation (fct ↔ mart totals).
-
-### Pools & Concurrency
-
-| Pool | Slots | Purpose |
-|------|-------|---------|
-| `emi_download_pool` | 2 | Rate-limit concurrent EMI downloads |
-| `dbt_pool` | 1 | Serialise dbt runs — prevent concurrent model builds |
-
-### Performance
-
-| Metric | Value |
-|--------|-------|
-| Full backfill (123 months ingest) | ~20 min |
-| `dbt run --full-refresh` | ~2 min (XS warehouse) |
-| Incremental monthly run | ~30 sec |
-| Snowflake credits (monthly) | < 0.5 credits |
-| S3 storage | ~100 MB total |
-
----
-
-## CI/CD
-
-GitHub Actions runs on every push and PR:
-
-- **Ruff** — Python linting (`airflow/`, `tests/`, `streamlit/`)
-- **SQLFluff** — SQL linting (Snowflake dialect, `dbt/models/`)
-- **dbt compile** — Validates SQL without Snowflake connection
-- **pytest** — DAG integrity tests (7 tasks, correct names, dependency chain)
-
----
-
-## Infrastructure
-
-All infrastructure is managed by Terraform:
-
-**AWS**: S3 bucket (versioning, lifecycle → IA after 90 days), IAM user for Snowflake access, budget alert at $5/month.
-
-**Snowflake**: Database, schemas (RAW, ANALYTICS), two warehouses (TRANSFORM_WH for dbt, DASHBOARD_WH for Streamlit), external stage, file format, roles (TRANSFORMER, READER).
+**Host-vs-Docker key-path quirk:** `.env` ships `SNOWFLAKE_PRIVATE_KEY_PATH=/opt/airflow/secrets/snowflake_rsa_key.p8` (the Airflow container path). For host-side dbt or Python runs, override:
 
 ```bash
-cd terraform
-terraform init    # S3 backend with DynamoDB locking
-terraform plan
-terraform apply
+SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 uv run dbt debug --target prod
 ```
+
+Don't edit `.env` — Airflow inside Docker still needs the container path.
 
 ---
 
-## Contributing
+## Phase implementation history
+
+The migration from V1 (generation only) to V2 (price + NSP + cross-source marts) shipped in 4 incremental phases. Each phase commit message details deliverables and PRD deviations:
+
+- **Phase 0** (`94917f8`) — dual-run infrastructure, cross-db macros, Mini POC validates SF ↔ DuckDB equality.
+- **Phase 1** (`e8eb44a`) — Final Energy Prices ingestion. PRD §2.3 schema (7 cols) corrected to actual 4 cols.
+- **Phase 2** (`836b3c3`) — NSP + dim_node + 4 cross-source marts. NSP coords confirmed NZTM (not lat/lng).
+- **Phase 3** (`9ceeff6`) — Dashboard upgrade: dual-mode loader + 4 V2 pages.
+- **Phase 4** (this) — V2 DAG, Terraform tables, dual-target CI, README + runbook.
+
+See `docs/plans/PRD_*` "变更记录" table rows 5.1-impl through 5.4-impl for the implementation log alongside the spec.
+
+---
+
+## Testing
 
 ```bash
-# Lint
-ruff check airflow/ tests/ streamlit/
-sqlfluff lint dbt/models/ --dialect snowflake
-
-# Test
-pytest tests/
-
-# dbt (inside Docker)
-docker compose exec airflow-scheduler bash -c "cd /opt/dbt && dbt compile"
+make dbt-test                     # 112 dbt tests on DuckDB
+pytest tests/ -v                  # DAG integrity (V1 + V2)
+uv run python scripts/mini_poc_fixture.py  # SF ↔ DuckDB equality (needs SF creds)
 ```
+
+CI (`.github/workflows/ci.yml`) runs Ruff, sqlfluff, dbt parse on both `dev` (DuckDB) and `prod` (SF dummy), and DAG integrity tests on every PR. The `dbt parse --target ci` job only runs on `main` push.
 
 ---
 
-## License
+## License & data attribution
 
-MIT
+Data: [NZ Electricity Authority — EMI](https://www.emi.ea.govt.nz/). Code: see `LICENSE`.

@@ -1,4 +1,8 @@
 dbt-core==1.8.0
 dbt-snowflake==1.8.0
+dbt-duckdb==1.8.4
 snowflake-connector-python
 apache-airflow-providers-amazon
+requests>=2.31
+pandas>=2.2
+duckdb>=1.0

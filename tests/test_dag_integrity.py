@@ -62,3 +62,41 @@ def test_dag_task_dependencies(dag):
             f"{upstream_id} should have {downstream_id} as downstream, "
             f"but has {downstream_ids}"
         )
+
+
+# ─── V2 DAG tests ─────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="module")
+def dag_v2(dagbag):
+    dag = dagbag.dags.get("nz_electricity_v2")
+    assert dag is not None, "DAG 'nz_electricity_v2' not found"
+    return dag
+
+
+def test_v2_dag_task_set(dag_v2):
+    expected = {
+        # generation branch
+        "generation_download", "generation_validate",
+        "generation_upload", "generation_load",
+        # price branch
+        "price_download", "price_validate", "price_upload", "price_load",
+        # nsp branch
+        "nsp_download", "nsp_upload", "nsp_load",
+        # dbt
+        "check_run_dbt", "run_dbt", "run_dbt_tests",
+    }
+    actual = {t.task_id for t in dag_v2.tasks}
+    assert actual == expected, (
+        f"v2 task mismatch. Missing: {expected - actual}, "
+        f"Extra: {actual - expected}"
+    )
+
+
+def test_v2_branch_join(dag_v2):
+    """All three ingest branches must converge on check_run_dbt."""
+    check = dag_v2.get_task("check_run_dbt")
+    upstream_ids = {t.task_id for t in check.upstream_list}
+    assert upstream_ids == {"generation_load", "price_load", "nsp_load"}, (
+        f"check_run_dbt upstream mismatch: {upstream_ids}"
+    )

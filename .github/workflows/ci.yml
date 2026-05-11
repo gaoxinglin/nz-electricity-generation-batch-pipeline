@@ -17,6 +17,32 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/ruff-action@v3
 
+  # ─── PR-safe: DuckDB parse (no SF creds required) ───────────
+  dbt-parse-dev:
+    name: dbt parse — DuckDB (dev target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install dbt-core==1.8.0 dbt-duckdb==1.8.4 dbt-snowflake==1.8.0
+      - name: Create DuckDB CI profile
+        run: |
+          mkdir -p $DBT_PROFILES_DIR
+          cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
+          nz_electricity:
+            target: dev
+            outputs:
+              dev:
+                type: duckdb
+                path: /tmp/nzeg_ci.duckdb
+                threads: 1
+          EOF
+      - run: cd dbt && dbt deps
+      - run: cd dbt && dbt parse --target dev
+
+  # ─── PR-safe: SQL lint via sqlfluff with Jinja templater ────
   lint-sql:
     name: SQLFluff (SQL lint)
     runs-on: ubuntu-latest
@@ -25,8 +51,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install sqlfluff sqlfluff-templater-dbt dbt-core dbt-snowflake
-      - name: Create CI profiles.yml
+      - run: pip install sqlfluff sqlfluff-templater-dbt dbt-core==1.8.0 dbt-snowflake==1.8.0
+      - name: Create CI profile (Snowflake dummy)
         run: |
           mkdir -p $DBT_PROFILES_DIR
           cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
@@ -45,21 +71,21 @@ jobs:
                 threads: 1
           EOF
           cp $DBT_PROFILES_DIR/profiles.yml dbt/profiles.yml
-      - name: Install dbt packages
-        run: cd dbt && dbt deps
-      - name: Lint dbt models
-        run: sqlfluff lint dbt/models/ --templater jinja --ignore parsing,templating
+      - run: cd dbt && dbt deps
+      - run: sqlfluff lint dbt/models/ --templater jinja --ignore parsing,templating
 
-  dbt-compile:
-    name: dbt compile
+  # ─── main-push-only: SF parse against prod target ───────────
+  dbt-parse-prod:
+    name: dbt parse — Snowflake (prod target)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install dbt-core dbt-snowflake
-      - name: Create CI profiles.yml
+      - run: pip install dbt-core==1.8.0 dbt-snowflake==1.8.0
+      - name: Create CI profile (Snowflake dummy)
         run: |
           mkdir -p $DBT_PROFILES_DIR
           cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
@@ -77,11 +103,10 @@ jobs:
                 schema: RAW
                 threads: 1
           EOF
-      - name: Install dbt packages
-        run: cd dbt && dbt deps
-      - name: Parse (syntax check only)
-        run: cd dbt && dbt parse
+      - run: cd dbt && dbt deps
+      - run: cd dbt && dbt parse --target ci
 
+  # ─── DAG integrity tests — V1 + V2 ──────────────────────────
   pytest:
     name: DAG integrity tests
     runs-on: ubuntu-latest
@@ -94,6 +119,7 @@ jobs:
           pip install apache-airflow==2.9.0 \
             apache-airflow-providers-amazon \
             snowflake-connector-python \
-            dbt-core dbt-snowflake \
+            dbt-core==1.8.0 dbt-snowflake==1.8.0 \
+            requests pandas \
             pytest
       - run: pytest tests/ -v
