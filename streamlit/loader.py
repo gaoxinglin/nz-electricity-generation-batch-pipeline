@@ -1,19 +1,68 @@
+"""
+Dual-mode warehouse loader.
+
+NZEG_MODE=local   → DuckDB at NZEG_DUCKDB_PATH (read_only; avoids dbt write lock)
+NZEG_MODE=cloud   → Snowflake using st.secrets["snowflake"]
+(unset)           → defaults to local
+
+All load_*() functions return pandas DataFrames with lowercase columns. SQL is
+written to be portable across DuckDB and Snowflake (no SF-only functions like
+TO_CHAR). Schema names differ by mode, so each load function references the
+right schema via _analytics()/_staging().
+"""
+
+from __future__ import annotations
+
 import os
 from contextlib import contextmanager
+from pathlib import Path
 
 import pandas as pd
-import snowflake.connector
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    NoEncryption,
-    PrivateFormat,
-    load_pem_private_key,
-)
 
 import streamlit as st
 
 
-def _private_key_bytes() -> bytes:
+def _mode() -> str:
+    return os.environ.get("NZEG_MODE", "local").lower()
+
+
+def _analytics() -> str:
+    """Fully-qualified analytics schema for the current mode."""
+    if _mode() == "local":
+        return "main_analytics"
+    return "RAW_ANALYTICS"  # Snowflake: target.schema='RAW' + +schema='analytics'
+
+
+def _staging() -> str:
+    if _mode() == "local":
+        return "main_raw"
+    return "RAW_RAW"
+
+
+# ─── connection plumbing ──────────────────────────────────────────────
+
+
+@contextmanager
+def _duckdb_conn():
+    import duckdb
+    path = os.environ.get("NZEG_DUCKDB_PATH", "data/nzeg.duckdb")
+    # Resolve relative to repo root if launched from streamlit/ subdir
+    if not Path(path).exists():
+        repo_root = Path(__file__).resolve().parent.parent
+        candidate = repo_root / path
+        if candidate.exists():
+            path = str(candidate)
+    conn = duckdb.connect(path, read_only=True)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _snowflake_private_key() -> bytes:
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+    )
     path = os.path.expanduser(st.secrets["snowflake"]["private_key_path"])
     with open(path, "rb") as fh:
         return load_pem_private_key(fh.read(), password=None).private_bytes(
@@ -22,12 +71,13 @@ def _private_key_bytes() -> bytes:
 
 
 @contextmanager
-def _conn():
+def _snowflake_conn():
+    import snowflake.connector
     s = st.secrets["snowflake"]
     conn = snowflake.connector.connect(
         account=s["account"],
         user=s["user"],
-        private_key=_private_key_bytes(),
+        private_key=_snowflake_private_key(),
         database=s["database"],
         warehouse=s["warehouse"],
         role=s["role"],
@@ -39,22 +89,40 @@ def _conn():
         conn.close()
 
 
+@contextmanager
+def _conn():
+    if _mode() == "local":
+        with _duckdb_conn() as c:
+            yield c
+    else:
+        with _snowflake_conn() as c:
+            yield c
+
+
+# ─── query helper ─────────────────────────────────────────────────────
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def _q(sql: str) -> pd.DataFrame:
     with _conn() as conn:
-        df = pd.read_sql(sql, conn)
+        if _mode() == "local":
+            df = conn.execute(sql).fetchdf()
+        else:
+            df = pd.read_sql(sql, conn)
     df.columns = df.columns.str.lower()
-    # Normalize year_month to zero-padded string ("202301") for consistent comparisons
     if "year_month" in df.columns:
         df["year_month"] = df["year_month"].astype(str).str.zfill(6)
     return df
 
 
+# ─── V1 loaders (Phase 0/Phase 1 preserved) ───────────────────────────
+
+
 def load_monthly() -> pd.DataFrame:
-    df = _q("""
+    df = _q(f"""
         SELECT year_month, fuel_type,
                total_generation_gwh, generator_count, active_days
-        FROM RAW_ANALYTICS.mart_generation_monthly
+        FROM {_analytics()}.mart_generation_monthly
         ORDER BY year_month, fuel_type
     """)
     df["date"] = pd.to_datetime(df["year_month"], format="%Y%m")
@@ -62,9 +130,9 @@ def load_monthly() -> pd.DataFrame:
 
 
 def load_renewable() -> pd.DataFrame:
-    df = _q("""
+    df = _q(f"""
         SELECT year_month, total_gwh, renewable_gwh, renewable_pct
-        FROM RAW_ANALYTICS.mart_renewable_ratio
+        FROM {_analytics()}.mart_renewable_ratio
         ORDER BY year_month
     """)
     df["date"] = pd.to_datetime(df["year_month"], format="%Y%m")
@@ -72,10 +140,10 @@ def load_renewable() -> pd.DataFrame:
 
 
 def load_ranking() -> pd.DataFrame:
-    df = _q("""
+    df = _q(f"""
         SELECT year_month, site_code,
                total_generation_gwh, monthly_rank, primary_fuel_type
-        FROM RAW_ANALYTICS.mart_plant_ranking
+        FROM {_analytics()}.mart_plant_ranking
         ORDER BY year_month DESC, monthly_rank
     """)
     df["date"] = pd.to_datetime(df["year_month"], format="%Y%m")
@@ -83,10 +151,10 @@ def load_ranking() -> pd.DataFrame:
 
 
 def load_seasonal() -> pd.DataFrame:
-    return _q("""
+    return _q(f"""
         SELECT season_year, season, fuel_type,
                total_generation_gwh, avg_generation_gwh
-        FROM RAW_ANALYTICS.mart_seasonal_pattern
+        FROM {_analytics()}.mart_seasonal_pattern
         ORDER BY season_year, season, fuel_type
     """)
 
@@ -95,4 +163,45 @@ def load_monthly_raw() -> pd.DataFrame:
     """Monthly with month_num column, used for heatmap."""
     df = load_monthly()
     df["month_num"] = df["date"].dt.month
+    return df
+
+
+# ─── V2 Phase 3 loaders (price marts) ─────────────────────────────────
+
+
+def load_price_daily() -> pd.DataFrame:
+    """mart_price_daily: POC × date with island/region and stats."""
+    df = _q(f"""
+        SELECT trading_date, poc_code, island, region, zone,
+               tp_count, avg_price_all, min_price, max_price, stddev_price,
+               spike_tp_count, negative_tp_count, pricing_regime
+        FROM {_analytics()}.mart_price_daily
+        ORDER BY trading_date, poc_code
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
+    return df
+
+
+def load_price_spikes() -> pd.DataFrame:
+    df = _q(f"""
+        SELECT trading_date, poc_code, tp_number, price_nzd_mwh,
+               island, region,
+               total_generation_kwh, renewable_generation_kwh,
+               thermal_generation_kwh, unmatched_generation
+        FROM {_analytics()}.mart_price_spike_events
+        ORDER BY trading_date, tp_number, poc_code
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
+    return df
+
+
+def load_renewable_price_impact() -> pd.DataFrame:
+    df = _q(f"""
+        SELECT trading_date, poc_code, tp_number, price_nzd_mwh,
+               total_generation_kwh, renewable_generation_kwh,
+               renewable_pct, island, region
+        FROM {_analytics()}.mart_renewable_price_impact
+        ORDER BY trading_date, tp_number, poc_code
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
     return df
