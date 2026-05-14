@@ -235,6 +235,33 @@ def load_dbt_runs() -> pd.DataFrame:
     return df
 
 
+def load_hydro_price_driver() -> pd.DataFrame:
+    """mart_hydro_price_driver: monthly island storage vs price."""
+    df = _q(f"""
+        SELECT
+            island, year_month,
+            avg_total_storage_mm3, min_storage_mm3, max_storage_mm3,
+            storage_pct_of_max, observation_days, avg_sites_reporting,
+            avg_price_nzd_mwh, avg_price_non_proxy, price_days, poc_count
+        FROM {_analytics()}.mart_hydro_price_driver
+        ORDER BY island, year_month
+    """)
+    return df
+
+
+def load_hydro_storage_detail() -> pd.DataFrame:
+    """fct_hydro: daily per-lake storage for sparklines and detail views."""
+    df = _q(f"""
+        SELECT
+            site_code, catchment_name, island, scheme,
+            trading_date, active_storage_mm3, level_m, quality_code
+        FROM {_analytics()}.fct_hydro
+        ORDER BY island, site_code, trading_date
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
+    return df
+
+
 def load_warehouse_cost() -> pd.DataFrame | None:
     """mart_warehouse_cost (SF only). Returns None on DuckDB target."""
     if _mode() == "local":

@@ -65,6 +65,7 @@ if _REPO_ROOT not in sys.path:
 S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "nz-electricity-generation")
 PRICE_S3_PREFIX = "raw/final_energy_prices"
 NSP_S3_PREFIX = "raw/nsp"
+HYDRO_S3_PREFIX = "raw/hydro_storage"
 
 EMI_BASE_URL = "https://www.emi.ea.govt.nz/Wholesale/Datasets/Generation/Generation_MD"
 S3_RAW_PREFIX = "raw/generation_md"
@@ -333,6 +334,101 @@ def nsp_load(**kwargs) -> None:
         conn.close()
 
 
+# ─── Hydro branch (optional, best-effort) ────────────────────────────
+# HMD is a periodic snapshot (≈ annual). Each monthly DAG run tries to
+# download the latest release; the download callable skips files already
+# present in the temp dir so re-runs on the same release are cheap.
+
+
+def hydro_download(**kwargs) -> None:
+    """Download latest HMD storage CSVs into temp dir."""
+    from scripts.download_hydro import download_hydro_storage
+    from pathlib import Path
+
+    out = Path(tempfile.gettempdir()) / "hydro_hmd"
+    ok = download_hydro_storage(out)
+    if not ok:
+        raise AirflowSkipException("No HMD release found or download failed")
+    kwargs["ti"].xcom_push(key="hydro_dir", value=str(out))
+
+
+def hydro_upload(**kwargs) -> None:
+    """Upload each downloaded lake CSV to S3."""
+    import re
+    from pathlib import Path
+
+    ti = kwargs["ti"]
+    hydro_dir = Path(ti.xcom_pull(key="hydro_dir", task_ids="hydro_download"))
+    hook = S3Hook(aws_conn_id="aws_default")
+    pattern = re.compile(r"^[A-Z]{2}_[A-Z]{2,4}_Storage_.*\.csv$")
+    files = [f for f in hydro_dir.iterdir() if pattern.match(f.name)]
+    for f in files:
+        s3_key = f"{HYDRO_S3_PREFIX}/{f.name}"
+        hook.load_file(filename=str(f), key=s3_key, bucket_name=S3_BUCKET, replace=True)
+        logger.info("uploaded %s to s3://%s/%s", f.name, S3_BUCKET, s3_key)
+    ti.xcom_push(key="file_count", value=len(files))
+
+
+def hydro_load(**kwargs) -> None:
+    """COPY INTO raw_hydro_storage from S3 — full reload via TRUNCATE + COPY."""
+    import re
+    import snowflake.connector
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+    )
+    from pathlib import Path
+
+    key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])
+    with open(key_path, "rb") as f:
+        pkey = load_pem_private_key(f.read(), password=None).private_bytes(
+            Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+        )
+    conn = snowflake.connector.connect(
+        account=os.environ["SNOWFLAKE_ACCOUNT"],
+        user=os.environ["SNOWFLAKE_USER"],
+        private_key=pkey,
+        database=os.environ["SNOWFLAKE_DATABASE"],
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"],
+        role=os.environ["SNOWFLAKE_ROLE"],
+        schema="RAW",
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute("BEGIN")
+        cur.execute("TRUNCATE TABLE raw_hydro_storage")
+        # Enumerate S3 files for this prefix and COPY each
+        hook = S3Hook(aws_conn_id="aws_default")
+        keys = hook.list_keys(bucket_name=S3_BUCKET, prefix=HYDRO_S3_PREFIX) or []
+        total = 0
+        pattern = re.compile(r"([A-Z]{2}_[A-Z]{2,4})_Storage_.*\.csv$")
+        for key in keys:
+            m = pattern.search(key)
+            if not m:
+                continue
+            site_code = m.group(1)
+            copy_sql = f"""
+                COPY INTO raw_hydro_storage (
+                    site_code, date_str, time_str, level_m,
+                    active_storage_mm3, contingent_storage_mm3, quality_code
+                )
+                FROM (
+                    SELECT '{site_code}', $1, $2, $3, $4, $5, $6
+                    FROM @raw_stage/hydro_storage/{key.split('/')[-1]}
+                )
+                FILE_FORMAT = (FORMAT_NAME = 'csv_format' SKIP_HEADER = 1)
+                ON_ERROR = 'CONTINUE'
+            """
+            cur.execute(copy_sql)
+            total += cur.fetchone()[0]
+        cur.execute("COMMIT")
+        logger.info("hydro loaded — %d rows across %d files", total, len(keys))
+    except Exception:
+        conn.cursor().execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
 # ─── DAG ──────────────────────────────────────────────────────────────
 
 
@@ -437,6 +533,15 @@ with DAG(
     n_upload = PythonOperator(task_id="nsp_upload", python_callable=nsp_upload)
     n_load = PythonOperator(task_id="nsp_load", python_callable=nsp_load)
 
+    # Hydro branch — best-effort (annual HMD snapshot; skip gracefully if unavailable)
+    h_download = PythonOperator(
+        task_id="hydro_download",
+        python_callable=hydro_download,
+        pool="emi_download_pool",
+    )
+    h_upload = PythonOperator(task_id="hydro_upload", python_callable=hydro_upload)
+    h_load = PythonOperator(task_id="hydro_load", python_callable=hydro_load)
+
     # dbt
     t_check_dbt = ShortCircuitOperator(
         task_id="check_run_dbt", python_callable=check_run_dbt
@@ -470,5 +575,6 @@ with DAG(
     g_download >> g_validate >> g_upload >> g_load
     p_download >> p_validate >> p_upload >> p_load
     n_download >> n_upload >> n_load
+    h_download >> h_upload >> h_load
 
-    [g_load, p_load, n_load] >> t_check_dbt >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts
+    [g_load, p_load, n_load, h_load] >> t_check_dbt >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts

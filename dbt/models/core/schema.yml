@@ -358,3 +358,80 @@ models:
       - name: fuel_type
         tests:
           - not_null
+
+  - name: dim_catchment
+    description: >
+      Hydro catchment dimension. One row per major NZ hydro storage lake.
+      Sourced from hydro_catchment_mapping seed (10 lakes, 2 islands).
+    columns:
+      - name: catchment_key
+        tests:
+          - not_null
+          - unique
+      - name: site_code
+        tests:
+          - not_null
+          - unique
+      - name: island
+        tests:
+          - accepted_values:
+              values: ['NI', 'SI']
+
+  - name: fct_hydro
+    description: >
+      Daily hydro lake storage fact. Grain: site_code × trading_date (2016+).
+      active_storage_mm3 in million cubic metres (Mm³).
+      Materialised as full-refresh table (HMD is a periodic snapshot).
+    columns:
+      - name: hydro_id
+        tests:
+          - not_null
+          - unique
+      - name: trading_date
+        tests:
+          - not_null
+      - name: site_code
+        tests:
+          - not_null
+      - name: active_storage_mm3
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 10000
+              config:
+                severity: warn
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - site_code
+            - trading_date
+
+  - name: mart_hydro_price_driver
+    description: >
+      Monthly hydro storage vs wholesale price per island. Grain: island × year_month.
+      avg_total_storage_mm3 = island sum of all lakes, monthly average.
+      storage_pct_of_max = % of the island's all-time max observed storage.
+      Price columns are NULL for months outside the loaded price range.
+    columns:
+      - name: island
+        tests:
+          - not_null
+      - name: year_month
+        tests:
+          - not_null
+      - name: avg_total_storage_mm3
+        tests:
+          - not_null
+      - name: storage_pct_of_max
+        tests:
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 100
+              config:
+                severity: warn
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - island
+            - year_month

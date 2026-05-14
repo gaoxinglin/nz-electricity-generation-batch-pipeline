@@ -2,25 +2,30 @@
         build up down restart logs backfill dbt-full
 
 # ==================== 面试演示 ====================
-demo:                    ## ~60s 启动：下 1 个月数据 → DuckDB → Streamlit
+demo:                    ## ~90s 启动：下 1 个月数据 + Hydro → DuckDB → Streamlit
 	uv sync
 	mkdir -p data/raw
 	uv run python scripts/download_generation.py --output data/raw/ --months 1
 	uv run python scripts/download_price.py --output data/raw/ --months 1 || true
+	uv run python scripts/download_nsp.py --output data/raw/ || true
+	uv run python scripts/download_hydro.py --output data/raw/ || true
 	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev
 	uv run python scripts/ingest_dbt_artifacts.py \
 	    --artifact dbt/target/run_results.json \
 	    --target duckdb --db data/nzeg.duckdb
+	cd dbt && uv run dbt run --profiles-dir . --target dev --select stg_dbt_run fct_dbt_run
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 # ==================== Local 模式 ====================
-local-full:              ## 一键全流程（全量历史 2016-至今）
+local-full:              ## 一键全流程（全量历史 2016-至今 + Hydro）
 	uv sync
 	mkdir -p data/raw
 	uv run python scripts/download_generation.py --output data/raw/
 	uv run python scripts/download_price.py --output data/raw/ || true
+	uv run python scripts/download_nsp.py --output data/raw/ || true
+	uv run python scripts/download_hydro.py --output data/raw/ || true
 	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev \
@@ -28,17 +33,20 @@ local-full:              ## 一键全流程（全量历史 2016-至今）
 	uv run python scripts/ingest_dbt_artifacts.py \
 	    --artifact dbt/target/run_results.json \
 	    --target duckdb --db data/nzeg.duckdb
+	cd dbt && uv run dbt run --profiles-dir . --target dev --select stg_dbt_run fct_dbt_run
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 local-subset:            ## 1 年数据子集（中等规模验证）
 	uv run python scripts/download_generation.py --output data/raw/ --years 1
 	uv run python scripts/download_price.py --output data/raw/ --years 1 || true
+	uv run python scripts/download_hydro.py --output data/raw/ || true
 	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev
 	uv run python scripts/ingest_dbt_artifacts.py \
 	    --artifact dbt/target/run_results.json \
 	    --target duckdb --db data/nzeg.duckdb
+	cd dbt && uv run dbt run --profiles-dir . --target dev --select stg_dbt_run fct_dbt_run
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
 
 dbt-test:                ## 单独跑 dbt test (DuckDB)

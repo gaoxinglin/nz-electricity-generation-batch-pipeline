@@ -37,6 +37,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 GENERATION_FILENAME_RE = re.compile(r"^(\d{6})_Generation_MD\.csv$")
 PRICE_FILENAME_RE = re.compile(r"^(\d{6})_FinalEnergyPrices\.csv$")
 NSP_FILENAME = "NetworkSupplyPointsTable.csv"
+HYDRO_STORAGE_SUBDIR = "hydro"
+# Filename pattern: {IslandCode}_{SiteCode}_Storage_{LakeName}.csv
+HYDRO_STORAGE_FILENAME_RE = re.compile(r"^([A-Z]{2}_[A-Z]{2,4})_Storage_.*\.csv$")
+
+# Maps raw CSV column names (including unicode) to normalised DuckDB column names.
+# Source header: Date, Time, Lake level (m), Active storage (Mm³),
+#                Active contingent storage (Mm³), QualityCode
+HYDRO_COLUMN_MAP = {
+    "Date": "date_str",
+    "Time": "time_str",
+    "Lake level (m)": "level_m",
+    "Active storage (Mm³)": "active_storage_mm3",       # Mm³
+    "Active contingent storage (Mm³)": "contingent_storage_mm3",
+    "QualityCode": "quality_code",
+}
 
 # EMI Final Energy Prices: 4 source cols (observed 2026-05; PRD §2.3 originally
 # claimed 7 — Island/IsProxyPriceFlag/PublishDateTime do not exist in the file).
@@ -255,6 +270,103 @@ def load_all_price(db_path: Path, source_dir: Path) -> None:
         conn.close()
 
 
+def ensure_raw_hydro_storage(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS raw.raw_hydro_storage (
+            site_code                 VARCHAR,
+            date_str                  VARCHAR,
+            time_str                  VARCHAR,
+            level_m                   VARCHAR,
+            active_storage_mm3        VARCHAR,
+            contingent_storage_mm3    VARCHAR,
+            quality_code              VARCHAR,
+            _source_file_modified_at  TIMESTAMP
+        )
+        """
+    )
+
+
+def load_hydro_file(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    site_code: str,
+) -> int:
+    """Load one lake storage CSV into raw_hydro_storage transactionally.
+
+    Idempotency: DELETE WHERE site_code=? then INSERT, all in one txn.
+    Reads via pandas so unicode column names are normalised before insertion.
+    """
+    import pandas as pd
+
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    df = pd.read_csv(csv_path, dtype=str)
+    df.columns = [c.strip() for c in df.columns]
+    df = df.rename(columns=HYDRO_COLUMN_MAP)
+    df["site_code"] = site_code
+    df["_source_file_modified_at"] = str(file_mtime)
+
+    keep = [
+        "site_code", "date_str", "time_str", "level_m",
+        "active_storage_mm3", "contingent_storage_mm3",
+        "quality_code", "_source_file_modified_at",
+    ]
+    df = df[[c for c in keep if c in df.columns]]
+
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(
+            "DELETE FROM raw.raw_hydro_storage WHERE site_code = ?", [site_code]
+        )
+        conn.register("_tmp_hydro", df)
+        conn.execute("INSERT INTO raw.raw_hydro_storage SELECT * FROM _tmp_hydro")
+        conn.unregister("_tmp_hydro")
+        row_count = conn.execute(
+            "SELECT count(*) FROM raw.raw_hydro_storage WHERE site_code = ?",
+            [site_code],
+        ).fetchone()[0]
+        conn.execute("COMMIT")
+        return row_count
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def load_hydro(db_path: Path, source_dir: Path) -> None:
+    """Load all lake storage CSVs from source_dir/hydro/ into raw_hydro_storage."""
+    hydro_dir = source_dir / HYDRO_STORAGE_SUBDIR
+    if not hydro_dir.exists():
+        logger.warning("no hydro directory at %s — skipping", hydro_dir)
+        return
+
+    files = sorted(
+        f for f in hydro_dir.iterdir()
+        if HYDRO_STORAGE_FILENAME_RE.match(f.name)
+    )
+    if not files:
+        logger.warning("no hydro storage CSVs found in %s — skipping", hydro_dir)
+        return
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    try:
+        ensure_raw_hydro_storage(conn)
+        total = 0
+        for f in files:
+            match = HYDRO_STORAGE_FILENAME_RE.match(f.name)
+            assert match is not None
+            site_code = match.group(1)
+            rows = load_hydro_file(conn, f, site_code)
+            logger.info("loaded %s — %d rows (site=%s)", f.name, rows, site_code)
+            total += rows
+        logger.info(
+            "done — %d files, %d total rows in raw.raw_hydro_storage", len(files), total
+        )
+    finally:
+        conn.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Load EMI CSVs into local DuckDB")
     p.add_argument("--db", required=True, help="Path to .duckdb file (created if missing)")
@@ -264,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     load_all_generation(Path(args.db), Path(args.source))
     load_all_price(Path(args.db), Path(args.source))
     load_nsp(Path(args.db), Path(args.source))
+    load_hydro(Path(args.db), Path(args.source))
     return 0
 
 

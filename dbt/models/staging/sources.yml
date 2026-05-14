@@ -35,3 +35,11 @@ sources:
           7 was incorrect — Island/IsProxyPriceFlag/PublishDateTime do not
           exist in the actual file). raw_price table = 4 source cols
           (all VARCHAR, lowercased) + trading_month + _source_file_modified_at.
+      - name: raw_hydro_storage
+        description: >
+          Raw EMI Hydrological Modelling Dataset (HMD) — storage section.
+          One row per lake × date from the 10 major NZ hydro lakes (2016+).
+          Columns: site_code (e.g. NI_TPO), date_str, time_str, level_m,
+          active_storage_mm3, contingent_storage_mm3, quality_code,
+          _source_file_modified_at. All VARCHAR; types cast in stg_hydro_storage.
+          HMD is a periodic snapshot (≈ annual) — no per-month freshness SLA.

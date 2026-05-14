@@ -1,0 +1,11 @@
+site_code,catchment_name,island,plant_group,scheme
+NI_TPO,Lake Taupo,NI,Waikato river,Waikato
+NI_WKA,Lake Waikaremoana,NI,Waikaremoana,Waikaremoana
+SI_TKA,Lake Tekapo,SI,Waitaki river,Waitaki
+SI_PKI,Lake Pukaki,SI,Waitaki river,Waitaki
+SI_OHA,Lake Ohau,SI,Waitaki river,Waitaki
+SI_HWE,Lake Hawea,SI,Clutha,Clutha
+SI_WAN,Lake Wanaka,SI,Clutha,Clutha
+SI_WPU,Lake Wakatipu,SI,Clutha,Clutha
+SI_MAN,Lake Manapouri,SI,Manapouri,Manapouri
+SI_TAU,Lake Te Anau,SI,Manapouri,Manapouri

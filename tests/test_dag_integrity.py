@@ -83,6 +83,8 @@ def test_v2_dag_task_set(dag_v2):
         "price_download", "price_validate", "price_upload", "price_load",
         # nsp branch
         "nsp_download", "nsp_upload", "nsp_load",
+        # hydro branch (V3)
+        "hydro_download", "hydro_upload", "hydro_load",
         # dbt + observability (Phase 5)
         "check_run_dbt", "run_dbt", "run_dbt_tests", "ingest_dbt_artifacts",
     }
@@ -94,9 +96,9 @@ def test_v2_dag_task_set(dag_v2):
 
 
 def test_v2_branch_join(dag_v2):
-    """All three ingest branches must converge on check_run_dbt."""
+    """All four ingest branches must converge on check_run_dbt."""
     check = dag_v2.get_task("check_run_dbt")
     upstream_ids = {t.task_id for t in check.upstream_list}
-    assert upstream_ids == {"generation_load", "price_load", "nsp_load"}, (
+    assert upstream_ids == {"generation_load", "price_load", "nsp_load", "hydro_load"}, (
         f"check_run_dbt upstream mismatch: {upstream_ids}"
     )

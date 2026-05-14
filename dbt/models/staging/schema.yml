@@ -124,3 +124,23 @@ models:
               values: ['NI', 'SI']
               config:
                 severity: warn
+
+  - name: stg_hydro_storage
+    description: >
+      Typed HMD lake storage: one row per site × date (2016+).
+      NULLs in active_storage_mm3 and unparseable dates are filtered at staging.
+    columns:
+      - name: site_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: active_storage_mm3
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 0
+              max_value: 10000
+              config:
+                severity: warn
