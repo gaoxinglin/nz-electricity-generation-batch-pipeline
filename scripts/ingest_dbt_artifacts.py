@@ -139,7 +139,8 @@ def write_duckdb(rows: list[dict], db_path: Path) -> None:
 # ─── Snowflake target ──────────────────────────────────────────
 
 
-def write_snowflake(rows: list[dict]) -> None:
+def _snowflake_connect():
+    """Return an authenticated Snowflake connection from env vars. Caller closes."""
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
         Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
@@ -149,7 +150,7 @@ def write_snowflake(rows: list[dict]) -> None:
         pkey = load_pem_private_key(f.read(), password=None).private_bytes(
             Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
         )
-    conn = snowflake.connector.connect(
+    return snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
         private_key=pkey,
@@ -158,6 +159,22 @@ def write_snowflake(rows: list[dict]) -> None:
         role=os.environ["SNOWFLAKE_ROLE"],
         schema="RAW",
     )
+
+
+def ensure_snowflake_table() -> None:
+    """CREATE IF NOT EXISTS raw_dbt_run on Snowflake. Used by --init."""
+    conn = _snowflake_connect()
+    try:
+        cur = conn.cursor()
+        cols_sql = ",\n        ".join(f'"{c}" VARCHAR' for c in RAW_COLUMNS)
+        cur.execute(f"CREATE TABLE IF NOT EXISTS raw_dbt_run ({cols_sql})")
+        logger.info("Snowflake: ensured raw_dbt_run table exists")
+    finally:
+        conn.close()
+
+
+def write_snowflake(rows: list[dict]) -> None:
+    conn = _snowflake_connect()
     try:
         cur = conn.cursor()
         cols_sql = ",\n        ".join(f'"{c}" VARCHAR' for c in RAW_COLUMNS)
@@ -189,11 +206,38 @@ def write_snowflake(rows: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Ingest dbt run_results.json into warehouse")
-    p.add_argument("--artifact", required=True, help="Path to run_results.json")
+    p.add_argument("--artifact", help="Path to run_results.json (required unless --init)")
     p.add_argument("--target", choices=["duckdb", "snowflake"], default="duckdb")
     p.add_argument("--db", default="data/nzeg.duckdb",
                    help="DuckDB path (target=duckdb only)")
+    p.add_argument(
+        "--init", action="store_true",
+        help=(
+            "Pre-create empty raw_dbt_run table and exit (no --artifact required). "
+            "Run once before the first `dbt run` to avoid the stg_dbt_run bootstrap "
+            "failure that would otherwise count permanently against the model "
+            "success-rate SLO. See PRD §10.1 Known Limitations."
+        ),
+    )
     args = p.parse_args(argv)
+
+    if args.init:
+        if args.target == "duckdb":
+            import duckdb
+            db_path = Path(args.db)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = duckdb.connect(str(db_path))
+            try:
+                ensure_duckdb_table(conn)
+                logger.info("DuckDB: ensured raw_dbt_run table exists at %s", db_path)
+            finally:
+                conn.close()
+        else:
+            ensure_snowflake_table()
+        return 0
+
+    if not args.artifact:
+        p.error("--artifact is required unless --init is set")
 
     path = Path(args.artifact)
     if not path.exists():

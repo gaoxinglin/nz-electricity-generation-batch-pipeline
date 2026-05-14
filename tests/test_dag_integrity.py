@@ -85,8 +85,9 @@ def test_v2_dag_task_set(dag_v2):
         "nsp_download", "nsp_upload", "nsp_load",
         # hydro branch (V3)
         "hydro_download", "hydro_upload", "hydro_load",
-        # dbt + observability (Phase 5)
-        "check_run_dbt", "run_dbt", "run_dbt_tests", "ingest_dbt_artifacts",
+        # dbt + observability (Phase 5 + 6.1-impl bootstrap fix)
+        "check_run_dbt", "prepare_raw_dbt_run",
+        "run_dbt", "run_dbt_tests", "ingest_dbt_artifacts",
     }
     actual = {t.task_id for t in dag_v2.tasks}
     assert actual == expected, (

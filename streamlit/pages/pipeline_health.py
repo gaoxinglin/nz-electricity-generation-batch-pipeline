@@ -53,34 +53,36 @@ tests_30 = last_30[last_30["node_type"] == "test"]
 test_pass_rate = (tests_30["status"] == "pass").mean() if not tests_30.empty else None
 
 
-def _slo_label(ok: bool | None, value: str) -> str:
+def _slo_badge(ok: bool | None) -> str:
+    """Return the SLO status badge alone. Goes into the metric *label* so the
+    value column stays uncluttered and won't truncate at narrow widths."""
     if ok is None:
-        return f"❓ {value}"
-    return f"{'✅' if ok else '❌'} {value}"
+        return "❓"
+    return "✅" if ok else "❌"
 
 
 k1, k2, k3, k4 = st.columns(4)
+
+ok_fresh = freshness_days is not None and freshness_days <= SLO_DATA_FRESHNESS_DAYS
 k1.metric(
-    f"Freshness (≤{SLO_DATA_FRESHNESS_DAYS}d)",
-    _slo_label(
-        freshness_days is not None and freshness_days <= SLO_DATA_FRESHNESS_DAYS,
-        f"{freshness_days}d ago" if freshness_days is not None else "—",
-    ),
+    f"{_slo_badge(ok_fresh)} Freshness (≤{SLO_DATA_FRESHNESS_DAYS}d)",
+    f"{freshness_days}d ago" if freshness_days is not None else "—",
 )
+
+ok_models = dag_success_rate is not None and dag_success_rate >= SLO_DAG_SUCCESS_RATE
 k2.metric(
+    f"{_slo_badge(ok_models if dag_success_rate is not None else None)} "
     f"Model success 30d (≥{SLO_DAG_SUCCESS_RATE:.0%})",
-    _slo_label(
-        dag_success_rate is not None and dag_success_rate >= SLO_DAG_SUCCESS_RATE,
-        f"{dag_success_rate:.1%}" if dag_success_rate is not None else "—",
-    ),
+    f"{dag_success_rate:.1%}" if dag_success_rate is not None else "—",
 )
+
+ok_tests = test_pass_rate is not None and test_pass_rate >= SLO_TEST_PASS_RATE
 k3.metric(
+    f"{_slo_badge(ok_tests if test_pass_rate is not None else None)} "
     f"Test pass 30d (≥{SLO_TEST_PASS_RATE:.0%})",
-    _slo_label(
-        test_pass_rate is not None and test_pass_rate >= SLO_TEST_PASS_RATE,
-        f"{test_pass_rate:.1%}" if test_pass_rate is not None else "—",
-    ),
+    f"{test_pass_rate:.1%}" if test_pass_rate is not None else "—",
 )
+
 k4.metric("Invocations tracked", f"{df['invocation_id'].nunique():,}")
 
 

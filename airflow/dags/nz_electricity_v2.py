@@ -546,6 +546,18 @@ with DAG(
     t_check_dbt = ShortCircuitOperator(
         task_id="check_run_dbt", python_callable=check_run_dbt
     )
+    # Pre-create raw_dbt_run table so the first DAG run on a new SF account
+    # doesn't fail stg_dbt_run/fct_dbt_run on missing source — that failure
+    # would leave a permanent 92.6% baseline in fct_dbt_run model-success KPI.
+    # See PRD §10.1 Known Limitations and changelog 6.1-impl.
+    t_init_raw_dbt_run = BashOperator(
+        task_id="prepare_raw_dbt_run",
+        bash_command=(
+            "python /opt/airflow/scripts/ingest_dbt_artifacts.py "
+            "--init --target snowflake"
+        ),
+        trigger_rule=TriggerRule.NONE_FAILED,
+    )
     t_dbt_run = BashOperator(
         task_id="run_dbt",
         bash_command="cd /opt/dbt && dbt run --target prod",
@@ -577,4 +589,4 @@ with DAG(
     n_download >> n_upload >> n_load
     h_download >> h_upload >> h_load
 
-    [g_load, p_load, n_load, h_load] >> t_check_dbt >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts
+    [g_load, p_load, n_load, h_load] >> t_check_dbt >> t_init_raw_dbt_run >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts
