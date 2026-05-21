@@ -2,6 +2,22 @@
 # Database & Schemas
 # ──────────────────────────────────────────────
 
+locals {
+  snowflake_service_rsa_public_key = replace(
+    replace(
+      replace(
+        replace(trimspace(file(var.snowflake_public_key_path)), "-----BEGIN PUBLIC KEY-----", ""),
+        "-----END PUBLIC KEY-----",
+        ""
+      ),
+      "\n",
+      ""
+    ),
+    "\r",
+    ""
+  )
+}
+
 resource "snowflake_database" "this" {
   name = var.snowflake_database
 }
@@ -627,6 +643,7 @@ resource "snowflake_user" "transformer" {
   name              = "TRANSFORMER_SVC"
   login_name        = "TRANSFORMER_SVC"
   password          = var.snowflake_transformer_password
+  rsa_public_key    = local.snowflake_service_rsa_public_key
   default_role      = snowflake_account_role.transformer.name
   default_warehouse = snowflake_warehouse.transform.name
   default_namespace = "${snowflake_database.this.name}.${snowflake_schema.raw.name}"
@@ -636,6 +653,7 @@ resource "snowflake_user" "reader" {
   name              = "READER_SVC"
   login_name        = "READER_SVC"
   password          = var.snowflake_reader_password
+  rsa_public_key    = local.snowflake_service_rsa_public_key
   default_role      = snowflake_account_role.reader.name
   default_warehouse = snowflake_warehouse.dashboard.name
   default_namespace = "${snowflake_database.this.name}.${snowflake_schema.analytics.name}"
