@@ -387,6 +387,51 @@ resource "snowflake_table" "raw_nsp" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_hydro_storage (8 columns) — Phase 2
+# 7 source columns (all VARCHAR) + _source_file_modified_at.
+# Loaded from EMI HMD lake-storage CSVs; stg_hydro_storage casts types.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_hydro_storage" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_HYDRO_STORAGE"
+
+  column {
+    name = "SITE_CODE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "DATE_STR"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TIME_STR"
+    type = "VARCHAR"
+  }
+  column {
+    name = "LEVEL_M"
+    type = "VARCHAR"
+  }
+  column {
+    name = "ACTIVE_STORAGE_MM3"
+    type = "VARCHAR"
+  }
+  column {
+    name = "CONTINGENT_STORAGE_MM3"
+    type = "VARCHAR"
+  }
+  column {
+    name = "QUALITY_CODE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Roles & Users
 # ──────────────────────────────────────────────
 

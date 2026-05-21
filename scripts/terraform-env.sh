@@ -40,8 +40,13 @@ if [[ -n "${SNOWFLAKE_USER:-}" && -z "${TF_VAR_snowflake_user:-}" ]]; then
   export TF_VAR_snowflake_user="$SNOWFLAKE_USER"
 fi
 
-if [[ -n "${SNOWFLAKE_PRIVATE_KEY_PATH:-}" && -z "${TF_VAR_snowflake_private_key_path:-}" ]]; then
-  export TF_VAR_snowflake_private_key_path="$SNOWFLAKE_PRIVATE_KEY_PATH"
+SNOWFLAKE_PRIVATE_KEY_PATH_FOR_TERRAFORM="${SNOWFLAKE_PRIVATE_KEY_PATH:-}"
+if [[ "$SNOWFLAKE_PRIVATE_KEY_PATH_FOR_TERRAFORM" == "/opt/airflow/secrets/snowflake_rsa_key.p8" && -f "$HOME/.ssh/snowflake_rsa_key.p8" ]]; then
+  SNOWFLAKE_PRIVATE_KEY_PATH_FOR_TERRAFORM="$HOME/.ssh/snowflake_rsa_key.p8"
+fi
+
+if [[ -n "$SNOWFLAKE_PRIVATE_KEY_PATH_FOR_TERRAFORM" && -z "${TF_VAR_snowflake_private_key_path:-}" ]]; then
+  export TF_VAR_snowflake_private_key_path="$SNOWFLAKE_PRIVATE_KEY_PATH_FOR_TERRAFORM"
 fi
 
 if [[ -n "${SNOWFLAKE_DATABASE:-}" && -z "${TF_VAR_snowflake_database:-}" ]]; then
