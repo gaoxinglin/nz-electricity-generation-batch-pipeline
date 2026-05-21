@@ -26,6 +26,7 @@ x-airflow-common: &airflow-common
     SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
+    - ./scripts:/opt/airflow/scripts:ro
     - ./dbt:/opt/dbt
     - airflow-logs:/opt/airflow/logs
     - ~/.ssh/snowflake_rsa_key.p8:/opt/airflow/secrets/snowflake_rsa_key.p8:ro
