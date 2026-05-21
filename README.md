@@ -272,7 +272,7 @@ Slack alerting is optional — set `SLACK_WEBHOOK_URL` and the V2 DAG's `on_fail
 
 1. Snowflake trial account (ap-southeast-2 region).
 2. `cp .env.example .env` and fill `SNOWFLAKE_*`, `AWS_*`, `S3_BUCKET_NAME`.
-3. `cd terraform && terraform apply` — creates DB, schemas, warehouses, RBAC, S3 bucket, IAM user.
+3. `make terraform-init && make terraform-apply` — loads `.env`, then creates DB, schemas, warehouses, RBAC, S3 bucket, IAM user.
 4. `cp dbt/profiles.yml.example dbt/profiles.yml`; the `prod` target reads env vars.
 5. `make cloud-up && make cloud-backfill`.
 

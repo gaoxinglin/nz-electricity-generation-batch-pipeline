@@ -1,5 +1,6 @@
-.PHONY: demo local-full local-subset dbt-test cloud-up cloud-backfill cloud-dbt-full cloud-dashboard \
-        build up down restart logs backfill dbt-full
+.PHONY: demo local-full local-subset dbt-test terraform-init terraform-plan terraform-apply \
+        cloud-up cloud-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
+        backfill dbt-full
 
 # ==================== 面试演示 ====================
 demo:                    ## ~90s 启动：下 1 个月数据 + Hydro → DuckDB → Streamlit
@@ -54,6 +55,16 @@ local-subset:            ## 1 年数据子集（中等规模验证）
 
 dbt-test:                ## 单独跑 dbt test (DuckDB)
 	cd dbt && uv run dbt test --profiles-dir . --target dev
+
+# ==================== Terraform ====================
+terraform-init:          ## Load .env and initialize Terraform backend
+	scripts/terraform-env.sh init -reconfigure
+
+terraform-plan:          ## Load .env and run Terraform plan
+	scripts/terraform-env.sh plan
+
+terraform-apply:         ## Load .env and apply Terraform changes
+	scripts/terraform-env.sh apply
 
 # ==================== Cloud 模式（Snowflake + Airflow Docker） ====================
 cloud-up:                ## 启动 Airflow (Docker Compose)
