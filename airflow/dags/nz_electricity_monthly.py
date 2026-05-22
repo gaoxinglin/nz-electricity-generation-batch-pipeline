@@ -274,6 +274,7 @@ def load_to_snowflake(**kwargs) -> None:
             )
             FILE_FORMAT = (FORMAT_NAME = 'csv_format')
             ON_ERROR = 'ABORT_STATEMENT'
+            FORCE = TRUE
         """
         result = cur.execute(copy_sql)
         rows_loaded = cur.fetchone()[0] if result else 0

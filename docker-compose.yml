@@ -1,5 +1,6 @@
 x-airflow-common: &airflow-common
   build: .
+  user: "${AIRFLOW_UID:-1000}:0"
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
@@ -26,6 +27,7 @@ x-airflow-common: &airflow-common
     SNOWFLAKE_DATABASE: ${SNOWFLAKE_DATABASE}
   volumes:
     - ./airflow/dags:/opt/airflow/dags
+    - ./scripts:/opt/airflow/scripts:ro
     - ./dbt:/opt/dbt
     - airflow-logs:/opt/airflow/logs
     - ~/.ssh/snowflake_rsa_key.p8:/opt/airflow/secrets/snowflake_rsa_key.p8:ro

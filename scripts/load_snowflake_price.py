@@ -97,6 +97,7 @@ def load_price_month(year_month: str, s3_key: str) -> int:
             )
             FILE_FORMAT = (FORMAT_NAME = 'csv_format')
             ON_ERROR = 'ABORT_STATEMENT'
+            FORCE = TRUE
         """
         cur.execute(copy_sql)
         loaded = cur.fetchone()[0]

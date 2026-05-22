@@ -32,7 +32,7 @@ WITH unpivoted AS (
        ) }}
 ),
 
-with_fuel AS (
+typed_with_fuel AS (
     SELECT
         u.site_code,
         u.poc_code,
@@ -45,11 +45,17 @@ with_fuel AS (
         CAST(u.trading_date AS DATE) AS trading_date,
         u.trading_month,
         u.tp_number AS trading_period,
-        CAST(u.tp_value_raw AS INTEGER) AS generation_kwh,
+        TRY_CAST(NULLIF(u.tp_value_raw, '') AS INTEGER) AS generation_kwh,
         u._source_file_modified_at
     FROM unpivoted AS u
     INNER JOIN {{ ref('fuel_codes') }} AS fc
         ON u.raw_fuel_code = fc.raw_fuel_code
+),
+
+with_fuel AS (
+    SELECT *
+    FROM typed_with_fuel
+    WHERE generation_kwh IS NOT NULL
 ),
 
 deduped AS (

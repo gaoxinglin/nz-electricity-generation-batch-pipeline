@@ -1,324 +1,394 @@
-# NZ Electricity Wholesale Market — Cross-Warehouse ELT
+# NZ Electricity Wholesale Market ELT Platform
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![dbt](https://img.shields.io/badge/dbt-1.8-FF694B?logo=dbt&logoColor=white)
 ![Snowflake](https://img.shields.io/badge/Snowflake-29B5E8?logo=snowflake&logoColor=white)
 ![DuckDB](https://img.shields.io/badge/DuckDB-FFF000?logo=duckdb&logoColor=black)
-![Airflow](https://img.shields.io/badge/Apache_Airflow-017CEE?logo=apacheairflow&logoColor=white)
-![Terraform](https://img.shields.io/badge/Terraform-7B42BC?logo=terraform&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)
-![AWS S3](https://img.shields.io/badge/AWS_S3-569A31?logo=amazons3&logoColor=white)
+![Apache Airflow](https://img.shields.io/badge/Apache_Airflow-2.9-017CEE?logo=apacheairflow&logoColor=white)
+![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white)
+![AWS S3](https://img.shields.io/badge/AWS_S3-Data_Lake-569A31?logo=amazons3&logoColor=white)
+![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
-An **ELT pipeline that runs the same dbt codebase on Snowflake (production) and DuckDB (local)**, ingesting NZ wholesale electricity data from the Electricity Authority's EMI portal — generation by plant, half-hourly clearing prices by node, and the network supply point (NSP) registry — and serving 9 Streamlit dashboard pages on top of a Kimball star schema.
+A production-style batch ELT platform for New Zealand wholesale electricity market data.
 
-**Why dual-warehouse?** NZ EMI is open data, but Snowflake costs real money during development and interviews need to run on a laptop. The pipeline is engineered so the *same SQL* compiles cleanly on both engines — local DuckDB for free, full-history demo runs, Snowflake for production-scale runs and ACCOUNT_USAGE-based cost telemetry. That portability is the project's central engineering bet, and the [cross-DB macros](#technical-highlights) are where it's earned.
+The project ingests public Electricity Authority EMI datasets, lands raw files in local storage or AWS S3, loads raw warehouse tables, transforms them with dbt into a Kimball-style analytics layer, runs reconciliation tests, captures dbt run telemetry, and serves the marts through a Streamlit dashboard.
 
----
+The main engineering constraint is portability: the same dbt project runs on DuckDB for local reproduction and Snowflake for cloud operation. That makes the project cheap to review on a laptop while still demonstrating the patterns expected in a cloud data engineering stack.
 
-## At a glance
+## What This Demonstrates
 
-| | 🟢 **Local mode** | ☁️ **Cloud mode** |
-|---|---|---|
-| Warehouse | DuckDB (single file) | Snowflake |
-| Orchestrator | Makefile | Airflow 2.9 (Docker) |
-| Object store | `data/raw/` | AWS S3 |
-| dbt profile | `dev` | `prod` |
-| Setup time | ~90 s (`make demo`) | ~30 min (SF trial + `terraform apply`) |
-| Use case | Demo / development / interview | Production-style run with telemetry |
+This repository is designed to be evaluated as a data engineering project, not only as a dashboard.
 
-| | |
+| Capability | Implementation |
 |---|---|
-| **Stack** | dbt 1.8 (Snowflake + DuckDB adapters) · Airflow · Terraform · Streamlit · AWS S3 · uv |
-| **Sources** | EMI Generation_MD · Final Energy Prices · NSP Table · Hydro Storage |
-| **Models** | 23 dbt models · 4 cross-DB macros · 7 singular reconciliation tests · ~105 schema tests |
-| **Dashboard** | 9 Streamlit pages (5 generation + 4 wholesale price) |
-| **Observability** | `fct_dbt_run` (run results) · `mart_warehouse_cost` (SF ACCOUNT_USAGE) |
-
----
-
-## Quick start (local, no cloud account)
-
-```bash
-git clone <repo> && cd nz-electricity-generation-batch-pipeline
-uv sync
-cp dbt/profiles.yml.example dbt/profiles.yml
-make demo                                   # ~90s: download 1 month → DuckDB → dbt → Streamlit
-```
-
-`make demo` opens Streamlit at <http://localhost:8501>. Other targets:
-
-```
-make local-full     # full history (2016 → now) → DuckDB → dbt run + test → Streamlit
-make local-subset   # last 12 months only
-make dbt-test       # 112 dbt tests on DuckDB
-make cloud-up       # docker-compose up Airflow (needs .env + SF creds)
-make cloud-backfill # trigger Airflow backfill for full history
-make cloud-dbt-full # one-shot dbt seed + run + test on Snowflake
-make cloud-dashboard  # Streamlit against Snowflake
-```
-
----
+| Batch ingestion | Python extract and validation scripts for generation, price, NSP, and hydro storage datasets |
+| Orchestration | Airflow DAG with parallel source branches, retry policy, pools, S3 landing, Snowflake loads, dbt run/test, and artifact ingestion |
+| Warehouse modeling | dbt staging, intermediate, dimension, fact, and mart models |
+| Cross-warehouse support | DuckDB local target and Snowflake production target using the same dbt codebase |
+| Infrastructure as code | Terraform-managed S3 bucket, IAM access, Snowflake database, schemas, stages, file format, and warehouses |
+| Data quality | dbt schema tests plus singular reconciliation tests for row counts, totals, join coverage, and null ratios |
+| Observability | dbt run results ingested into `fct_dbt_run`; Snowflake warehouse usage surfaced through `mart_warehouse_cost` |
+| Analytics serving | Streamlit dashboard backed by mart-layer tables; Power BI can consume the same marts as an optional business reporting layer |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    EMI["EMI<br/>Generation_MD · FinalEnergyPrices · NSP · Hydro"]
+    EMI["Electricity Authority EMI<br/>Generation_MD, FinalEnergyPrices, NSP, Hydro"]
 
-    subgraph LOCAL["🟢 Local"]
-      direction TB
-      DLS["scripts/download_*.py"]
-      LOAD["scripts/load_local.py<br/>(transactional CSV → table)"]
-      DUCK[("DuckDB<br/>nzeg.duckdb")]
+    subgraph LOCAL["Local development"]
+        L_EXTRACT["Python download scripts"]
+        L_LOAD["Transactional DuckDB load"]
+        DUCK[("DuckDB<br/>data/nzeg.duckdb")]
     end
 
-    subgraph CLOUD["☁️ Cloud"]
-      direction TB
-      AF["Airflow V2 DAG<br/>(3 ingest branches + dbt)"]
-      S3["AWS S3<br/>raw/generation · raw/price · raw/nsp · raw/hydro"]
-      SF[("Snowflake<br/>RAW + ANALYTICS")]
+    subgraph CLOUD["Cloud operation"]
+        AF["Airflow DAG<br/>monthly batch orchestration"]
+        S3["AWS S3<br/>raw file landing"]
+        SF_RAW[("Snowflake RAW")]
     end
 
-    EMI -.local.-> DLS --> LOAD --> DUCK
-    EMI -.cloud.-> AF --> S3 --> SF
-
-    subgraph DBT["dbt — same models, both engines"]
-      direction TB
-      STG["staging<br/>(typed views + audit)"]
-      INT["intermediate<br/>(int_price_daily, int_generation_by_poc)"]
-      CORE["core<br/>(dim_* · fct_* · mart_*)"]
+    subgraph DBT["dbt transformations"]
+        STG["Staging<br/>typed and audited"]
+        INT["Intermediate<br/>join-ready grains"]
+        CORE["Core analytics<br/>dimensions, facts, marts"]
+        TESTS["dbt tests<br/>schema and reconciliation"]
     end
 
+    subgraph SERVE["Serving and observability"]
+        ST["Streamlit dashboard"]
+        BI["Optional Power BI report"]
+        OBS["fct_dbt_run<br/>mart_warehouse_cost"]
+    end
+
+    EMI --> L_EXTRACT --> L_LOAD --> DUCK
+    EMI --> AF --> S3 --> SF_RAW
     DUCK --> STG
-    SF --> STG
-    STG --> INT --> CORE
-
-    OBS["fct_dbt_run · mart_warehouse_cost<br/>(observability marts)"]
-    ST["Streamlit · 9 pages"]
+    SF_RAW --> STG
+    STG --> INT --> CORE --> TESTS
     CORE --> ST
-    CORE --> OBS
-    OBS --> ST
-
-    classDef src fill:#1e40af,color:#fff
-    classDef store fill:#b45309,color:#fff
-    classDef warehouse fill:#7c3aed,color:#fff
-    classDef dbt fill:#c2410c,color:#fff
-    classDef view fill:#6b21a8,color:#fff
-    class EMI src
-    class S3 store
-    class DUCK,SF warehouse
-    class STG,INT,CORE,OBS dbt
-    class ST view
+    CORE --> BI
+    CORE --> OBS --> ST
 ```
 
-The dbt project compiles cleanly on both adapters because every engine-specific construct is encapsulated in `dbt/macros/cross_db/`. The Airflow V2 DAG ingests generation / price / NSP in parallel branches and then runs dbt + tests in one Snowflake task.
+## Data Sources
 
-### Dashboard preview
+| Source | Grain | Use in model |
+|---|---:|---|
+| Generation_MD | Generator x trading date x trading period | Fuel mix, plant ranking, renewable share, generation facts |
+| FinalEnergyPrices | POC x trading date x trading period | Price facts, price spikes, island spread, renewable-price analysis |
+| Network Supply Points | POC / node reference | Region and island enrichment for price and generation analysis |
+| Hydro storage | Site x date | Hydro storage trend and hydro-price driver mart |
 
-| Generation overview | Fuel trend | Plant ranking |
-|---|---|---|
-| ![Overview](docs/screenshots/01_overview.png) | ![Fuel Trends](docs/screenshots/02_fuel_trends.png) | ![Plant Ranking](docs/screenshots/03_plant_ranking.png) |
+The raw datasets include New Zealand half-hour trading periods. The dbt macros handle TP01-TP50 so daylight saving days with 46 or 50 periods can be modeled without hard-coding one warehouse dialect into the project.
 
-| Renewable share | Seasonal pattern |
-|---|---|
-| ![Renewable Share](docs/screenshots/04_renewable_share.png) | ![Seasonal](docs/screenshots/05_seasonal_patterns.png) |
+## Design Choices
 
----
+### Dual warehouse target
 
-## Technical highlights
+DuckDB is used for local review, development, and interview demos. Snowflake is used for the cloud path. The same dbt project compiles for both targets, with engine-specific SQL isolated in cross-database macros under `dbt/macros/cross_db/`.
 
-**1. One dbt codebase, two warehouses — proven by row-level equality test**
+### Raw-to-mart separation
 
-Engine-specific SQL is isolated in 4 macros under `dbt/macros/cross_db/`:
+Raw tables preserve source-oriented structures. Staging models handle typing, normalization, and audit flags. Intermediate models create stable grains for joins. Core models expose dimensions, facts, and marts for reporting.
 
-| Macro | Why it exists |
-|---|---|
-| `unpivot_trading_periods` | NZ uses 48 half-hour trading periods per day. DST spring-forward leaves 46, autumn-back has 50. The macro emits `LATERAL FLATTEN` on Snowflake and `UNPIVOT` on DuckDB, both covering TP01–TP50 with `NULL` filtering for missing periods. |
-| `generate_date_spine` | `GENERATE_SERIES` on DuckDB vs `SEQ4()` table generator on Snowflake. |
-| `day_of_week` | ISO weekday differs between engines' `EXTRACT` defaults. |
-| `yyyymm_minus_one_month` | Backfill arithmetic without engine-specific date functions. |
+### Idempotent batch loading
 
-`scripts/mini_poc_fixture.py` materialises a fixture on both engines and asserts row-level equality. CI runs `dbt parse` against both targets on every PR.
+Monthly generation and price loads are designed to be rerunnable. The pipeline deletes or replaces the target month before loading corrected files. Snapshot-style reference datasets such as NSP and hydro storage are full-reloaded where that is simpler and safer.
 
-**2. Idempotent ingest with engine-appropriate strategies**
+### Tests live with the transformation layer
 
-| Layer | DuckDB strategy | Snowflake strategy |
-|---|---|---|
-| `raw_*` load | Transactional CSV → table (`scripts/load_local.py` wraps in a single transaction; rollback on failure) | `COPY INTO` from S3 stage via `load_snowflake_price.py` |
-| `int_*` and `mart_*` | dbt `delete+insert` (DuckDB has no MERGE) | dbt `merge` (faster on SF) |
+Data quality checks are part of dbt, not a separate notebook or manual process. The project includes schema tests for primary keys, relationships, accepted values, and ranges, plus singular tests that reconcile mart totals back to raw/staging data.
 
-The choice is target-aware in `dbt_project.yml`. `merge` would silently fail on DuckDB; `delete+insert` would scan unnecessarily on Snowflake.
+### Dashboard is a consumer, not the architecture
 
-**3. dbt observability marts — run telemetry from artifacts**
+Streamlit is included because it is easy to run from the repository and demonstrates that the marts are usable. A Power BI report is a good optional portfolio artifact, but it should connect to the same dbt mart layer rather than replacing the engineering demo.
 
-After every `dbt run`/`dbt test`, the v2 DAG's `TriggerRule.ALL_DONE` task pipes `target/run_results.json` through `scripts/ingest_dbt_artifacts.py` into `raw.raw_dbt_run`. The dbt model `fct_dbt_run` flattens it into one row per (run, model). On Snowflake only, `mart_warehouse_cost` joins to `ACCOUNT_USAGE.WAREHOUSE_METERING_HISTORY` for USD-estimated cost per warehouse per day.
+## Repository Layout
 
-Both feed the **🩺 Pipeline Health** Streamlit page, which surfaces the SLOs below without leaving the dashboard.
-
-**4. Reconciliation tests live in dbt, not in a separate test runner**
-
-`dbt/tests/` ships 7 singular reconciliation tests that fail the build if drift is detected:
-
-| Test | What it catches |
-|---|---|
-| `test_row_count_per_month.sql` | Monthly row counts in mart vs raw drift |
-| `test_renewable_total_reconciliation.sql` | Hydro + wind + solar in mart ≠ source aggregate |
-| `test_fct_price_raw_reconciliation.sql` | Price mart total MWh ≠ raw clearing prices |
-| `test_int_generation_by_poc_reconciliation.sql` | int_generation_by_poc loses or doubles records vs staging |
-| `test_fct_mart_monthly_reconciliation.sql` | Monthly mart vs daily mart sums must match |
-| `test_poc_match_rate.sql` | POC join coverage to NSP registry below threshold |
-| `test_unexpected_null_ratio.sql` | Audit-flagged null ratios exceed tolerance |
-
----
-
-## Business questions
-
-**Generation (V1)**
-
-1. Daily / monthly NZ generation by fuel type — `mart_generation_daily`, `mart_generation_monthly`
-2. Plant ranking by output — `mart_plant_ranking`
-3. Renewable-share trend over time — `mart_renewable_ratio`
-4. Seasonal patterns (NIWA southern-hemisphere seasons) — `mart_seasonal_pattern`
-
-**Wholesale Price (V2)**
-
-5. Per-POC daily price summary — `mart_price_daily`
-6. Spike events (> $300/MWh) with co-located fuel mix — `mart_price_spike_events`
-7. Renewable share vs price (non-monotonic) — `mart_renewable_price_impact`
-8. NI vs SI island spread + HVDC link signal — derived from `mart_price_daily`
-
-**Hydro driver (cross-source)**
-
-9. Lake storage vs price impulse — `mart_hydro_price_driver`
-
----
-
-## Data model
-
-```
-RAW (S3 / DuckDB)
-  raw_generation · raw_price · raw_nsp · raw_hydro · raw_dbt_run
-        │
-        ▼
-STAGING (views, type-cast, audited)
-  stg_generation · stg_price · stg_nsp · stg_hydro_storage · stg_dbt_run
-  + stg_generation_null_audit · stg_price_outlier_audit  (data-quality views)
-        │
-        ▼
-INTERMEDIATE
-  int_price_daily · int_generation_by_poc
-        │
-        ▼
-CORE (dim + fct + mart)
-  dim_date · dim_fuel · dim_plant · dim_node · dim_catchment
-  fct_generation · fct_price · fct_hydro · fct_dbt_run
-  mart_generation_daily · mart_generation_monthly · mart_plant_ranking
-  mart_renewable_ratio · mart_seasonal_pattern
-  mart_price_daily · mart_price_spike_events · mart_renewable_price_impact
-  mart_hydro_price_driver · mart_warehouse_cost (SF only)
-```
-
-23 dbt models. 21 build on DuckDB (2 SF-only marts depend on `ACCOUNT_USAGE`).
-
----
-
-## Observability & SLOs
-
-The **🩺 Pipeline Health** Streamlit page (`pages/pipeline_health.py`) is backed by `fct_dbt_run` and `mart_warehouse_cost`:
-
-| SLO | Target | Source signal |
-|---|---|---|
-| Data freshness | Latest successful `model` run ≤ **7 days** old | `fct_dbt_run` (last `is_success`) |
-| 30-day model success rate | ≥ **95 %** | `fct_dbt_run` rolling 30 days |
-| 30-day test pass rate | ≥ **99 %** | `fct_dbt_run.status='pass'` ratio |
-| Cost (SF only) | informational — `usd_estimated` 30-day total | `mart_warehouse_cost` |
-
-Slack alerting is optional — set `SLACK_WEBHOOK_URL` and the V2 DAG's `on_failure_callback` posts a structured message per failed task. Without it, it falls back to Airflow `email_on_failure`.
-
----
-
-## Repository structure
-
-```
+```text
 .
-├── airflow/dags/
-│   ├── nz_electricity_monthly.py        # V1 — generation only (fallback)
-│   └── nz_electricity_v2.py             # V2 — generation || price || NSP + dbt
-├── dbt/
-│   ├── macros/cross_db/                 # 4 cross-database macros
-│   ├── models/staging/ intermediate/ core/
-│   ├── seeds/                           # fuel_codes · nz_public_holidays
-│   └── tests/                           # 7 singular reconciliation tests
-├── scripts/
-│   ├── download_generation.py · download_price.py · download_nsp.py · download_hydro.py
-│   ├── load_local.py                    # DuckDB transactional CSV → table
-│   ├── load_snowflake_price.py          # SF COPY INTO helper for V2 DAG
-│   ├── ingest_dbt_artifacts.py          # run_results.json → raw_dbt_run
-│   └── mini_poc_fixture.py              # Cross-warehouse equality test
-├── streamlit/
-│   ├── app.py                           # navigation
-│   ├── loader.py                        # dual-mode (DuckDB / Snowflake)
-│   ├── charts.py                        # shared plot helpers
-│   └── pages/                           # 9 dashboard pages + Pipeline Health
-├── terraform/                           # SF database / schemas / roles · S3 bucket · IAM
-├── docs/runbook.md                      # failure-mode runbook
-└── docs/plans/PRD_*                     # PRD spec
+|-- airflow/dags/                 # Airflow monthly batch DAGs
+|-- dbt/
+|   |-- macros/cross_db/           # Warehouse-specific SQL abstraction
+|   |-- models/staging/            # Typed source-facing models and audit views
+|   |-- models/intermediate/       # Join-ready transformation grains
+|   |-- models/core/               # Dimensions, facts, analytical marts
+|   |-- seeds/                     # Fuel, holiday, and hydro mapping reference data
+|   `-- tests/                     # Singular reconciliation tests
+|-- scripts/                       # Extract, validation, local load, Snowflake load, artifact ingest
+|-- streamlit/                     # Dashboard application and data loaders
+|-- terraform/                     # AWS and Snowflake infrastructure
+|-- tests/                         # Airflow DAG integrity tests
+|-- docs/screenshots/              # Dashboard screenshots
+`-- docs/runbook.md                # Operational notes and troubleshooting
 ```
 
----
+## Quick Start: Local DuckDB Demo
 
-## Cloud-mode setup
-
-1. Snowflake trial account (ap-southeast-2 region).
-2. `cp .env.example .env` and fill `SNOWFLAKE_*`, `AWS_*`, `S3_BUCKET_NAME`.
-3. `cd terraform && terraform apply` — creates DB, schemas, warehouses, RBAC, S3 bucket, IAM user.
-4. `cp dbt/profiles.yml.example dbt/profiles.yml`; the `prod` target reads env vars.
-5. `make cloud-up && make cloud-backfill`.
-
-**Host vs Docker key-path quirk**: `.env` ships `SNOWFLAKE_PRIVATE_KEY_PATH=/opt/airflow/secrets/snowflake_rsa_key.p8` (the Airflow container path). For host-side dbt or Python runs, override:
+The local path requires no cloud account.
 
 ```bash
-SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 uv run dbt debug --target prod
+uv sync
+cp dbt/profiles.yml.example dbt/profiles.yml
+make demo
 ```
 
-Don't edit `.env` — Airflow inside Docker still needs the container path. See `docs/runbook.md` for the full set of dual-mode pitfalls (caught and fixed during phase 0).
+`make demo` downloads a small data slice, loads DuckDB, runs dbt, ingests dbt artifacts, and starts Streamlit at:
 
----
+```text
+http://localhost:8501
+```
 
-## Testing
+For larger local validation:
 
 ```bash
-make dbt-test                              # 112 dbt tests on DuckDB
-pytest tests/ -v                           # DAG integrity (V1 + V2)
-uv run python scripts/mini_poc_fixture.py  # SF ↔ DuckDB equality (needs SF creds)
+make local-subset    # approximately one year of data
+make local-full      # full available history
+make dbt-test        # dbt tests on DuckDB
 ```
 
-| Layer | Coverage |
+## Cloud Run: AWS S3, Snowflake, Airflow
+
+Cloud mode requires AWS credentials, a Snowflake account, and a Snowflake key-pair user.
+
+```bash
+cp .env.example .env
+cp dbt/profiles.yml.example dbt/profiles.yml
+
+make terraform-init
+make terraform-plan
+make terraform-apply
+
+make cloud-up
+make cloud-backfill
+make cloud-dbt-full
+make cloud-dashboard
+```
+
+The cloud path provisions or uses:
+
+| Component | Purpose |
 |---|---|
-| dbt schema tests | not_null + unique on PKs · accepted_values on enums · range tests on numeric columns |
-| dbt singular tests | 7 reconciliation tests (row counts, totals, join coverage — see Highlights §4) |
-| Airflow DAG integrity | DAG parses, has exactly N tasks, dependency graph is acyclic — for both V1 and V2 |
-| Cross-warehouse equality | `mini_poc_fixture.py` materialises a fixture on both engines and asserts row-by-row equality |
+| AWS S3 bucket | Raw CSV landing zone under `raw/` prefixes |
+| AWS IAM user/policy | Read access for Snowflake external stage |
+| Snowflake database | RAW and ANALYTICS schemas |
+| Snowflake warehouses | `TRANSFORM_WH` and `DASHBOARD_WH`, XSMALL with auto-suspend |
+| Snowflake stage | `RAW.RAW_STAGE` pointing to the S3 raw prefix |
+| Airflow | Monthly ingestion, S3 upload, Snowflake load, dbt run/test, artifact capture |
 
-CI (`.github/workflows/ci.yml`) runs Ruff, sqlfluff, `dbt parse --target dev` (DuckDB) and `dbt parse --target prod` (SF dummy credentials, parse-only), plus DAG integrity tests on every PR.
+Host-side dbt and Streamlit commands may need the local private key path instead of the container path:
 
----
+```bash
+SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 \
+  uv run dbt debug --profiles-dir dbt --target prod
+```
 
-## Scope and non-goals
+## dbt Model Layer
 
-**In scope**
-- ELT from EMI public CSV feeds to a Kimball star schema, runnable on Snowflake or DuckDB from the same dbt codebase.
-- Idempotent monthly backfill via Airflow with run telemetry feeding back into the warehouse.
-- 9 Streamlit dashboard pages backed by mart-layer tables.
+```text
+RAW
+  raw_generation
+  raw_price
+  raw_nsp
+  raw_hydro_storage
+  raw_dbt_run
 
-**Out of scope**
-- Real-time / streaming ingestion — EMI publishes monthly CSV files with a publish-day delay; batch is the right tool.
-- Production SLA ownership — this is a portfolio project demonstrating dual-warehouse ELT patterns, not a managed service.
-- Forecasting — the pipeline answers descriptive questions; predictive models are deliberately out of scope.
+STAGING
+  stg_generation
+  stg_price
+  stg_nsp
+  stg_hydro_storage
+  stg_dbt_run
+  stg_generation_null_audit
+  stg_price_outlier_audit
 
----
+INTERMEDIATE
+  int_generation_by_poc
+  int_price_daily
 
-## License & data attribution
+CORE ANALYTICS
+  dim_date
+  dim_fuel
+  dim_plant
+  dim_node
+  dim_catchment
+  fct_generation
+  fct_price
+  fct_hydro
+  fct_dbt_run
+  mart_generation_daily
+  mart_generation_monthly
+  mart_plant_ranking
+  mart_renewable_ratio
+  mart_seasonal_pattern
+  mart_price_daily
+  mart_price_spike_events
+  mart_renewable_price_impact
+  mart_hydro_price_driver
+  mart_warehouse_cost              # Snowflake only; depends on ACCOUNT_USAGE
+```
 
-Data: [NZ Electricity Authority — EMI](https://www.emi.ea.govt.nz/). Code: [MIT](LICENSE).
+The analytical marts answer these business questions:
+
+| Area | Questions |
+|---|---|
+| Generation | Daily and monthly generation by fuel, plant ranking, renewable share, seasonal behavior |
+| Wholesale price | Daily POC price, price spikes, negative prices, regional and island spread |
+| Cross-source analysis | Renewable share versus price, hydro storage versus price |
+| Operations | dbt model/test success rate, freshness, Snowflake warehouse usage |
+
+## Data Quality and Reconciliation
+
+The project uses dbt tests as deployment gates.
+
+| Test type | Examples |
+|---|---|
+| Schema tests | `not_null`, `unique`, `relationships`, `accepted_values`, numeric range checks |
+| Reconciliation tests | Raw-to-fact price totals, renewable totals, mart daily/monthly consistency, POC match rate, monthly row counts |
+| DAG tests | Airflow DAG imports, task counts, dependency graph integrity |
+| CI checks | Ruff, SQLFluff, dbt parse for DuckDB and Snowflake-compatible targets, pytest DAG integrity |
+
+Key commands:
+
+```bash
+make dbt-test
+pytest tests/ -v
+uv run python scripts/mini_poc_fixture.py
+```
+
+`scripts/mini_poc_fixture.py` is the strongest cross-warehouse check: it materializes a small fixture on DuckDB and Snowflake and compares the output row by row.
+
+## Observability
+
+After dbt runs, `scripts/ingest_dbt_artifacts.py` loads `target/run_results.json` into `raw_dbt_run`. The `fct_dbt_run` model exposes one row per dbt node execution so the dashboard can report:
+
+| Metric | Source |
+|---|---|
+| Latest successful model run | `fct_dbt_run` |
+| Model success rate | `fct_dbt_run` |
+| Test pass rate | `fct_dbt_run` |
+| Slowest models/tests | `fct_dbt_run.execution_time_seconds` |
+| Snowflake warehouse cost estimate | `mart_warehouse_cost` |
+
+Slack alerting is optional through `SLACK_WEBHOOK_URL`. Without it, Airflow still records task failures and logs.
+
+## Dashboard Layer
+
+Run locally:
+
+```bash
+NZEG_MODE=local uv run streamlit run streamlit/app.py
+```
+
+Run against Snowflake:
+
+```bash
+make cloud-dashboard
+```
+
+The Streamlit dashboard is intentionally thin: it queries the mart layer and avoids embedding transformation logic in the UI. That keeps dbt as the source of truth and allows another BI tool, such as Power BI, to consume the same tables.
+
+Current dashboard screenshots are stored in `docs/screenshots/`.
+
+## Evidence Pack for Interviews
+
+If you present this project in interviews, prepare screenshots that prove the cloud path actually ran. Redact account identifiers, access keys, private keys, email addresses, bucket names if needed, and any `.env` content.
+
+### AWS evidence
+
+Capture:
+
+1. S3 bucket object listing showing raw prefixes:
+   - `raw/generation_md/`
+   - `raw/final_energy_prices/`
+   - `raw/nsp/`
+   - `raw/hydro_storage/`
+2. One opened S3 prefix with multiple month files and recent timestamps.
+3. S3 bucket properties showing versioning enabled and public access blocked.
+4. IAM policy attached to the Snowflake S3 user, with credentials redacted.
+5. Terraform plan/apply output showing the S3 and IAM resources were created. Do not share raw Terraform state if it contains secrets.
+
+### Snowflake evidence
+
+Capture Snowsight screenshots with SQL and result grids, not only object browser pages:
+
+```sql
+show warehouses like '%WH';
+
+select table_schema, table_name, row_count
+from information_schema.tables
+where table_schema in ('RAW', 'ANALYTICS')
+order by table_schema, table_name;
+
+select node_type, status, count(*) as executions
+from analytics.fct_dbt_run
+group by 1, 2
+order by 1, 2;
+
+select *
+from analytics.mart_warehouse_cost
+order by usage_date desc, warehouse_name
+limit 20;
+```
+
+Also capture:
+
+1. `RAW.RAW_STAGE` definition with the S3 URL partly redacted.
+2. `RAW` and `ANALYTICS` schemas with raw, fact, dimension, and mart tables.
+3. Query history showing `COPY INTO`, `dbt run`, and `dbt test` activity.
+4. Warehouse settings for `TRANSFORM_WH` and `DASHBOARD_WH`, especially size and auto-suspend.
+
+### Airflow evidence
+
+Capture:
+
+1. `nz_electricity_v2` DAG graph view showing generation, price, NSP, hydro, dbt, and artifact ingestion tasks.
+2. A successful DAG run grid view.
+3. Task logs for one S3 upload task, one Snowflake load task, `run_dbt`, `run_dbt_tests`, and `ingest_dbt_artifacts`.
+4. Backfill run list if you ran `make cloud-backfill`.
+
+### dbt and CI evidence
+
+Capture:
+
+1. Terminal output for `make dbt-test` or `dbt test --target prod`.
+2. dbt docs lineage for at least one mart, for example `mart_renewable_price_impact`.
+3. GitHub Actions CI summary showing Ruff, SQLFluff, dbt parse, and DAG integrity tests passing.
+4. The `fct_dbt_run` table with recent successful model and test rows.
+
+### Dashboard and BI evidence
+
+Capture:
+
+1. Streamlit overview page connected to DuckDB.
+2. Streamlit cloud mode connected to Snowflake, if available.
+3. Pipeline Health page showing dbt success/test metrics.
+4. Optional Power BI report pages connected to the Snowflake or exported mart layer.
+
+The strongest portfolio evidence is a short sequence: Airflow successful run -> S3 raw files -> Snowflake raw/analytics row counts -> dbt test pass -> dashboard page. That sequence proves the work is an end-to-end data platform, not only a static dashboard.
+
+## Scope
+
+In scope:
+
+- Batch ingestion from public EMI files.
+- Local DuckDB and cloud Snowflake execution paths.
+- dbt transformation, tests, marts, and run telemetry.
+- Airflow orchestration for cloud operation.
+- Terraform for AWS and Snowflake infrastructure.
+- Streamlit dashboard as a lightweight consumer of the mart layer.
+
+Out of scope:
+
+- Real-time streaming. EMI data is file-based and batch-oriented.
+- Production SLA ownership. This is a portfolio-grade implementation, not a managed service.
+- Forecasting or machine learning.
+- A full BI semantic layer. Power BI is best added as a separate consumer of the existing marts.
+
+## License and Attribution
+
+Data source: New Zealand Electricity Authority EMI public datasets.
+
+Code license: MIT.

@@ -1,5 +1,6 @@
-.PHONY: demo local-full local-subset dbt-test cloud-up cloud-backfill cloud-dbt-full cloud-dashboard \
-        build up down restart logs backfill dbt-full
+.PHONY: demo local-full local-subset dbt-test terraform-init terraform-plan terraform-apply \
+        cloud-up cloud-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
+        backfill dbt-full
 
 # ==================== 面试演示 ====================
 demo:                    ## ~90s 启动：下 1 个月数据 + Hydro → DuckDB → Streamlit
@@ -55,23 +56,49 @@ local-subset:            ## 1 年数据子集（中等规模验证）
 dbt-test:                ## 单独跑 dbt test (DuckDB)
 	cd dbt && uv run dbt test --profiles-dir . --target dev
 
+# ==================== Terraform ====================
+terraform-init:          ## Load .env and initialize Terraform backend
+	scripts/terraform-env.sh init -reconfigure
+
+terraform-plan:          ## Load .env and run Terraform plan
+	scripts/terraform-env.sh plan
+
+terraform-apply:         ## Load .env and apply Terraform changes
+	scripts/terraform-env.sh apply
+
 # ==================== Cloud 模式（Snowflake + Airflow Docker） ====================
 cloud-up:                ## 启动 Airflow (Docker Compose)
 	docker compose up -d --build
 
-cloud-backfill:          ## 触发 Airflow 回填（2016-01-01 至上月）
-	docker compose exec airflow-scheduler airflow dags backfill \
-	    nz_electricity_v2 \
-	    --start-date 2016-01-01 \
-	    --end-date $(shell date -v-1m +%Y-%m-01)
+cloud-backfill:          ## 首次历史回填：按月触发 ingestion-only V2 DAG（2016-01 至上月）
+	docker compose exec airflow-scheduler bash -c '\
+	    end_ym=$$(date -d "$$(date +%Y-%m-01) -1 day" +%Y%m); \
+	    for year in $$(seq 2016 "$${end_ym:0:4}"); do \
+	      for month in $$(seq -w 1 12); do \
+	        ym="$$year$$month"; \
+	        if [[ "$$ym" -le "$$end_ym" ]]; then \
+	          airflow dags trigger nz_electricity_v2 \
+	            --conf "{\"year_month\":\"$$ym\",\"skip_dbt\":true}"; \
+	        fi; \
+	      done; \
+	    done; \
+	    echo "Queued V2 ingestion-only runs through $$end_ym. After they finish, run: make cloud-dbt-full"'
 
 cloud-dbt-full:          ## Snowflake 全量刷新（首次回填后调用一次）
-	cd dbt && uv run dbt seed --profiles-dir . --target prod \
-	    && uv run dbt run --profiles-dir . --target prod --full-refresh \
-	    && uv run dbt test --profiles-dir . --target prod
+	bash -lc 'set -a; source .env; set +a; \
+	    if [[ "$$SNOWFLAKE_PRIVATE_KEY_PATH" == "/opt/airflow/secrets/snowflake_rsa_key.p8" && -f "$$HOME/.ssh/snowflake_rsa_key.p8" ]]; then \
+	      export SNOWFLAKE_PRIVATE_KEY_PATH="$$HOME/.ssh/snowflake_rsa_key.p8"; \
+	    fi; \
+	    cd dbt && uv run dbt seed --profiles-dir . --target prod \
+	      && uv run dbt run --profiles-dir . --target prod --full-refresh \
+	      && uv run dbt test --profiles-dir . --target prod'
 
 cloud-dashboard:         ## Streamlit → Snowflake
-	NZEG_MODE=cloud uv run streamlit run streamlit/app.py
+	bash -lc 'set -a; source .env; set +a; \
+	    if [[ "$$SNOWFLAKE_PRIVATE_KEY_PATH" == "/opt/airflow/secrets/snowflake_rsa_key.p8" && -f "$$HOME/.ssh/snowflake_rsa_key.p8" ]]; then \
+	      export SNOWFLAKE_PRIVATE_KEY_PATH="$$HOME/.ssh/snowflake_rsa_key.p8"; \
+	    fi; \
+	    NZEG_MODE=cloud uv run streamlit run streamlit/app.py'
 
 # ==================== V1 legacy (compose lifecycle) ====================
 build:

@@ -42,6 +42,64 @@ jobs:
       - run: cd dbt && dbt deps
       - run: cd dbt && dbt parse --target dev
 
+  # ─── PR-safe E2E: generated raw CSVs → DuckDB → dbt run/test ───
+  e2e-duckdb:
+    name: End-to-end — DuckDB fixture
+    runs-on: ubuntu-latest
+    env:
+      CI_RAW_DIR: /tmp/nzeg_ci_raw
+      NZEG_DUCKDB_PATH: /tmp/nzeg_e2e.duckdb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install local E2E dependencies
+        run: |
+          pip install \
+            dbt-core==1.8.0 \
+            dbt-duckdb==1.8.4 \
+            dbt-snowflake==1.8.0 \
+            duckdb \
+            pandas \
+            pyarrow \
+            requests
+      - name: Create DuckDB CI profile
+        run: |
+          mkdir -p $DBT_PROFILES_DIR
+          cat > $DBT_PROFILES_DIR/profiles.yml <<'EOF'
+          nz_electricity:
+            target: dev
+            outputs:
+              dev:
+                type: duckdb
+                path: "{{ env_var('NZEG_DUCKDB_PATH') }}"
+                threads: 2
+          EOF
+      - name: Generate deterministic raw fixture
+        run: python scripts/create_ci_fixture.py --output "$CI_RAW_DIR"
+      - name: Load raw CSVs into DuckDB
+        run: python scripts/load_local.py --db "$NZEG_DUCKDB_PATH" --source "$CI_RAW_DIR"
+      - name: Bootstrap dbt artifact table
+        run: python scripts/ingest_dbt_artifacts.py --init --target duckdb --db "$NZEG_DUCKDB_PATH"
+      - name: Install dbt packages
+        run: cd dbt && dbt deps --profiles-dir "$DBT_PROFILES_DIR"
+      - name: Build marts on DuckDB
+        run: |
+          cd dbt
+          dbt seed --profiles-dir "$DBT_PROFILES_DIR" --target dev
+          dbt run --profiles-dir "$DBT_PROFILES_DIR" --target dev --full-refresh
+      - name: Ingest dbt run artifact
+        run: |
+          python scripts/ingest_dbt_artifacts.py \
+            --artifact dbt/target/run_results.json \
+            --target duckdb \
+            --db "$NZEG_DUCKDB_PATH"
+      - name: Refresh dbt observability models
+        run: cd dbt && dbt run --profiles-dir "$DBT_PROFILES_DIR" --target dev --select stg_dbt_run fct_dbt_run
+      - name: Run dbt quality gates
+        run: cd dbt && dbt test --profiles-dir "$DBT_PROFILES_DIR" --target dev
+
   # ─── PR-safe: SQL lint via sqlfluff with Jinja templater ────
   lint-sql:
     name: SQLFluff (SQL lint)

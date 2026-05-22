@@ -178,6 +178,7 @@ def write_snowflake(rows: list[dict]) -> None:
     try:
         cur = conn.cursor()
         cols_sql = ",\n        ".join(f'"{c}" VARCHAR' for c in RAW_COLUMNS)
+        quoted_columns = ", ".join(f'"{c}"' for c in RAW_COLUMNS)
         cur.execute(f"CREATE TABLE IF NOT EXISTS raw_dbt_run ({cols_sql})")
         if not rows:
             return
@@ -185,12 +186,12 @@ def write_snowflake(rows: list[dict]) -> None:
         cur.execute("BEGIN")
         try:
             cur.execute(
-                "DELETE FROM raw_dbt_run WHERE invocation_id = %s",
+                'DELETE FROM raw_dbt_run WHERE "invocation_id" = %s',
                 (invocation_id,),
             )
             placeholders = ", ".join(["%s"] * len(RAW_COLUMNS))
             cur.executemany(
-                f"INSERT INTO raw_dbt_run ({', '.join(RAW_COLUMNS)}) "
+                f"INSERT INTO raw_dbt_run ({quoted_columns}) "
                 f"VALUES ({placeholders})",
                 [tuple(r[c] for c in RAW_COLUMNS) for r in rows],
             )

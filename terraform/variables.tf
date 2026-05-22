@@ -48,6 +48,11 @@ variable "snowflake_private_key_path" {
   type        = string
 }
 
+variable "snowflake_public_key_path" {
+  description = "Path to the RSA public key file assigned to Snowflake service users"
+  type        = string
+}
+
 variable "snowflake_database" {
   description = "Snowflake database name"
   type        = string

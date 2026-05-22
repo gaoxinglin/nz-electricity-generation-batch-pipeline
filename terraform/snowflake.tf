@@ -2,6 +2,22 @@
 # Database & Schemas
 # ──────────────────────────────────────────────
 
+locals {
+  snowflake_service_rsa_public_key = replace(
+    replace(
+      replace(
+        replace(trimspace(file(var.snowflake_public_key_path)), "-----BEGIN PUBLIC KEY-----", ""),
+        "-----END PUBLIC KEY-----",
+        ""
+      ),
+      "\n",
+      ""
+    ),
+    "\r",
+    ""
+  )
+}
+
 resource "snowflake_database" "this" {
   name = var.snowflake_database
 }
@@ -387,6 +403,51 @@ resource "snowflake_table" "raw_nsp" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_hydro_storage (8 columns) — Phase 2
+# 7 source columns (all VARCHAR) + _source_file_modified_at.
+# Loaded from EMI HMD lake-storage CSVs; stg_hydro_storage casts types.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_hydro_storage" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_HYDRO_STORAGE"
+
+  column {
+    name = "SITE_CODE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "DATE_STR"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TIME_STR"
+    type = "VARCHAR"
+  }
+  column {
+    name = "LEVEL_M"
+    type = "VARCHAR"
+  }
+  column {
+    name = "ACTIVE_STORAGE_MM3"
+    type = "VARCHAR"
+  }
+  column {
+    name = "CONTINGENT_STORAGE_MM3"
+    type = "VARCHAR"
+  }
+  column {
+    name = "QUALITY_CODE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Roles & Users
 # ──────────────────────────────────────────────
 
@@ -405,6 +466,15 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_database" {
   on_account_object {
     object_type = "DATABASE"
     object_name = snowflake_database.this.name
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "transformer_snowflake_database" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["IMPORTED PRIVILEGES"]
+  on_account_object {
+    object_type = "DATABASE"
+    object_name = "SNOWFLAKE"
   }
 }
 
@@ -582,6 +652,7 @@ resource "snowflake_user" "transformer" {
   name              = "TRANSFORMER_SVC"
   login_name        = "TRANSFORMER_SVC"
   password          = var.snowflake_transformer_password
+  rsa_public_key    = local.snowflake_service_rsa_public_key
   default_role      = snowflake_account_role.transformer.name
   default_warehouse = snowflake_warehouse.transform.name
   default_namespace = "${snowflake_database.this.name}.${snowflake_schema.raw.name}"
@@ -591,6 +662,7 @@ resource "snowflake_user" "reader" {
   name              = "READER_SVC"
   login_name        = "READER_SVC"
   password          = var.snowflake_reader_password
+  rsa_public_key    = local.snowflake_service_rsa_public_key
   default_role      = snowflake_account_role.reader.name
   default_warehouse = snowflake_warehouse.dashboard.name
   default_namespace = "${snowflake_database.this.name}.${snowflake_schema.analytics.name}"

@@ -12,8 +12,9 @@ V1 (`nz_electricity_monthly`, generation only) and V2 (`nz_electricity_v2`, gene
 1. `terraform apply` to provision `raw_price` + `raw_nsp` tables and the new S3 prefixes (`raw/final_energy_prices/`, `raw/nsp/`).
 2. `docker compose build` to pick up the updated `requirements-airflow.txt` (adds `dbt-duckdb`, `requests`, `pandas`, `duckdb`).
 3. In Airflow UI, unpause `nz_electricity_v2`. Trigger one manual run with `{"year_month": "<last complete month>"}` and confirm all three ingest branches finish + dbt run/test pass.
-4. Pause `nz_electricity_monthly`. Keep the file in `airflow/dags/` for ~1 month as a hot fallback.
-5. `make cloud-dbt-full` once to materialise all Phase 1+2 marts on Snowflake.
+4. `make cloud-backfill` to queue monthly V2 history runs with `skip_dbt=true`; wait for the ingestion tasks to finish.
+5. `make cloud-dbt-full` once to seed, full-refresh, and test Snowflake marts after raw history is loaded.
+6. Pause `nz_electricity_monthly`. Keep the file in `airflow/dags/` for ~1 month as a hot fallback.
 
 **Rollback:** unpause V1, pause V2. Generation continues from V1's `raw_generation` table — V2 marts won't refresh but the V1 dashboard pages remain functional.
 
@@ -27,6 +28,8 @@ V1 (`nz_electricity_monthly`, generation only) and V2 (`nz_electricity_v2`, gene
 | `Catalog "NZ_ELECTRICITY_DB" does not exist` on DuckDB | `sources.yml` not target-aware | Already fixed Phase 0 (`{{ target.database }}`) |
 | `read_only=True` collides with concurrent dbt run | Streamlit + dbt both touch `.duckdb` | dbt has the write lock; refresh Streamlit after dbt finishes |
 | `[Errno 2] /opt/airflow/secrets/snowflake_rsa_key.p8` on host | `.env` has the Docker container path | `SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 uv run dbt …` |
+| `StreamlitSecretNotFoundError` in cloud dashboard | Local Streamlit has no `secrets.toml` | Use `make cloud-dashboard`; it loads `.env`, and deployment can still use Streamlit `snowflake` secrets. |
+| Snowflake raw rows disappear after replay | `DELETE`/`TRUNCATE` ran before COPY skipped an already-loaded staged file | Cloud COPY statements use `FORCE = TRUE`; replay the affected Airflow run after deploying the DAG. |
 | `Table Function "flatten" not in catalog` on DuckDB | model uses SF-only `LATERAL FLATTEN` | Use `unpivot_trading_periods` macro or target-aware inline |
 | `incremental_strategy 'merge' is not valid` | `merge` is SF-only | Switch to `delete+insert` |
 
