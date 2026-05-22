@@ -6,11 +6,10 @@ import os
 
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-
-import streamlit as st
 from charts import apply_layout
 from loader import load_dbt_runs, load_warehouse_cost
+
+import streamlit as st
 
 st.title("🩺 Pipeline Health")
 st.caption(

@@ -5,11 +5,11 @@ from __future__ import annotations
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from charts import apply_layout
+from loader import load_hydro_price_driver, load_hydro_storage_detail
 from plotly.subplots import make_subplots
 
 import streamlit as st
-from charts import apply_layout
-from loader import load_hydro_price_driver, load_hydro_storage_detail
 
 st.title("💧 Hydro-Price Driver")
 st.caption(

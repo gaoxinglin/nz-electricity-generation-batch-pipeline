@@ -90,6 +90,7 @@ def _csv_filename(year_month: str) -> str:
 
 def generation_download_csv(**kwargs) -> None:
     import time
+
     import requests
     year_month = _get_year_month(**kwargs)
     filename = _csv_filename(year_month)
@@ -166,7 +167,10 @@ def generation_upload_to_s3(**kwargs) -> None:
 def generation_load_to_snowflake(**kwargs) -> None:
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
     ti = kwargs["ti"]
     year_month = ti.xcom_pull(key="year_month", task_ids="generation_download")
@@ -221,8 +225,9 @@ def check_run_dbt(**kwargs) -> bool:
 
 def price_download(**kwargs) -> None:
     """Fetch one month of EMI Final Energy Prices into /tmp."""
-    from scripts.download_price import fetch_month, DEFAULT_BYMONTH_CUTOFF
     from pathlib import Path
+
+    from scripts.download_price import DEFAULT_BYMONTH_CUTOFF, fetch_month
 
     dag_run = kwargs["dag_run"]
     ym = dag_run.conf.get("year_month") or kwargs["logical_date"].strftime("%Y%m")
@@ -236,8 +241,9 @@ def price_download(**kwargs) -> None:
 
 
 def price_validate(**kwargs) -> None:
-    from scripts.validate_price import validate_file
     from pathlib import Path
+
+    from scripts.validate_price import validate_file
 
     local_path = kwargs["ti"].xcom_pull(key="local_path", task_ids="price_download")
     rows = validate_file(Path(local_path))
@@ -273,8 +279,9 @@ def price_load(**kwargs) -> None:
 
 
 def nsp_download(**kwargs) -> None:
-    from scripts.download_nsp import find_latest
     from pathlib import Path
+
+    from scripts.download_nsp import find_latest
 
     out = Path(tempfile.gettempdir())
     path = find_latest(out)
@@ -297,7 +304,10 @@ def nsp_load(**kwargs) -> None:
     """COPY INTO raw_nsp from S3 — full reload via TRUNCATE + COPY."""
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
 
     key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])
@@ -319,7 +329,7 @@ def nsp_load(**kwargs) -> None:
         cur = conn.cursor()
         cur.execute("BEGIN")
         cur.execute("TRUNCATE TABLE raw_nsp")
-        cur.execute(f"""
+        cur.execute("""
             COPY INTO raw_nsp
             FROM @raw_stage/nsp/NetworkSupplyPointsTable.csv
             FILE_FORMAT = (FORMAT_NAME = 'csv_format')
@@ -344,8 +354,9 @@ def nsp_load(**kwargs) -> None:
 
 def hydro_download(**kwargs) -> None:
     """Download latest HMD storage CSVs into temp dir."""
-    from scripts.download_hydro import download_hydro_storage
     from pathlib import Path
+
+    from scripts.download_hydro import download_hydro_storage
 
     out = Path(tempfile.gettempdir()) / "hydro_hmd"
     ok = download_hydro_storage(out)
@@ -376,9 +387,13 @@ def hydro_upload(**kwargs) -> None:
 def hydro_load(**kwargs) -> None:
     """COPY INTO raw_hydro_storage from S3 — full reload via TRUNCATE + COPY."""
     import re
+
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
 
     hook = S3Hook(aws_conn_id="aws_default")

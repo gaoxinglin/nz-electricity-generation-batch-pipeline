@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.express as px
-
-import streamlit as st
 from charts import apply_layout
 from loader import load_price_spikes
+
+import streamlit as st
 
 st.title("🔺 Price Spikes")
 st.caption(

@@ -20,7 +20,6 @@ import sys
 from datetime import date
 from pathlib import Path
 
-
 YEAR = 2024
 MONTH = 1
 TRADING_MONTH = f"{YEAR}{MONTH:02d}"

@@ -18,10 +18,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
-
-import streamlit as st
 from streamlit.errors import StreamlitSecretNotFoundError
 
+import streamlit as st
 
 _SNOWFLAKE_ENV = {
     "account": "SNOWFLAKE_ACCOUNT",
@@ -97,7 +96,10 @@ def _snowflake_settings() -> dict[str, str]:
 
 def _snowflake_private_key(settings: dict[str, str]) -> bytes:
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
     path = os.path.expanduser(settings["private_key_path"])
     with open(path, "rb") as fh:
@@ -258,7 +260,7 @@ def load_dbt_runs() -> pd.DataFrame:
             FROM {_analytics()}.fct_dbt_run
             ORDER BY generated_at DESC
         """)
-    except Exception as exc:
+    except Exception:
         # First run before any artifact ingest: return empty frame with right schema
         return pd.DataFrame(columns=[
             "invocation_id", "generated_at", "generated_date", "dbt_version",

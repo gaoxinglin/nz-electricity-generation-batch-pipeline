@@ -5,10 +5,10 @@ from __future__ import annotations
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-
-import streamlit as st
 from charts import apply_layout
 from loader import load_price_daily
+
+import streamlit as st
 
 st.title("🏝️ Island Spread")
 st.caption(

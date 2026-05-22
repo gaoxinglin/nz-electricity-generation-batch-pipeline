@@ -49,7 +49,10 @@ def snowflake_query() -> pd.DataFrame:
     """Run the Snowflake side of the macro logic. Returns a DataFrame."""
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
 
     key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])

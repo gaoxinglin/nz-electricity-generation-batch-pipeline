@@ -143,7 +143,10 @@ def _snowflake_connect():
     """Return an authenticated Snowflake connection from env vars. Caller closes."""
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
     key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])
     with open(key_path, "rb") as f:
