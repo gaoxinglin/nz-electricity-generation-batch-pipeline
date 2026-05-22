@@ -351,7 +351,7 @@ def hydro_download(**kwargs) -> None:
     ok = download_hydro_storage(out)
     if not ok:
         raise AirflowSkipException("No HMD release found or download failed")
-    kwargs["ti"].xcom_push(key="hydro_dir", value=str(out))
+    kwargs["ti"].xcom_push(key="hydro_dir", value=str(out / "hydro"))
 
 
 def hydro_upload(**kwargs) -> None:
@@ -364,6 +364,8 @@ def hydro_upload(**kwargs) -> None:
     hook = S3Hook(aws_conn_id="aws_default")
     pattern = re.compile(r"^[A-Z]{2}_[A-Z]{2,4}_Storage_.*\.csv$")
     files = [f for f in hydro_dir.iterdir() if pattern.match(f.name)]
+    if not files:
+        raise ValueError(f"No HMD storage CSVs found in {hydro_dir}")
     for f in files:
         s3_key = f"{HYDRO_S3_PREFIX}/{f.name}"
         hook.load_file(filename=str(f), key=s3_key, bucket_name=S3_BUCKET, replace=True)
@@ -378,7 +380,15 @@ def hydro_load(**kwargs) -> None:
     from cryptography.hazmat.primitives.serialization import (
         Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
     )
-    from pathlib import Path
+
+    hook = S3Hook(aws_conn_id="aws_default")
+    pattern = re.compile(r"([A-Z]{2}_[A-Z]{2,4})_Storage_.*\.csv$")
+    keys = [
+        key for key in hook.list_keys(bucket_name=S3_BUCKET, prefix=HYDRO_S3_PREFIX) or []
+        if pattern.search(key)
+    ]
+    if not keys:
+        raise ValueError(f"No HMD storage CSVs found at s3://{S3_BUCKET}/{HYDRO_S3_PREFIX}")
 
     key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])
     with open(key_path, "rb") as f:
@@ -398,15 +408,9 @@ def hydro_load(**kwargs) -> None:
         cur = conn.cursor()
         cur.execute("BEGIN")
         cur.execute("TRUNCATE TABLE raw_hydro_storage")
-        # Enumerate S3 files for this prefix and COPY each
-        hook = S3Hook(aws_conn_id="aws_default")
-        keys = hook.list_keys(bucket_name=S3_BUCKET, prefix=HYDRO_S3_PREFIX) or []
         total = 0
-        pattern = re.compile(r"([A-Z]{2}_[A-Z]{2,4})_Storage_.*\.csv$")
         for key in keys:
             m = pattern.search(key)
-            if not m:
-                continue
             site_code = m.group(1)
             copy_sql = f"""
                 COPY INTO raw_hydro_storage (

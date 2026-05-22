@@ -103,3 +103,26 @@ def test_v2_branch_join(dag_v2):
     assert upstream_ids == {"generation_load", "price_load", "nsp_load", "hydro_load"}, (
         f"check_run_dbt upstream mismatch: {upstream_ids}"
     )
+
+
+def test_v2_hydro_download_pushes_csv_directory(dag_v2, monkeypatch, tmp_path):
+    from scripts import download_hydro
+
+    class StubTaskInstance:
+        def __init__(self):
+            self.xcom = {}
+
+        def xcom_push(self, key, value):
+            self.xcom[key] = value
+
+    def fake_download(output_dir):
+        assert output_dir == tmp_path / "hydro_hmd"
+        return True
+
+    monkeypatch.setattr(download_hydro, "download_hydro_storage", fake_download)
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    ti = StubTaskInstance()
+    dag_v2.get_task("hydro_download").python_callable(ti=ti)
+
+    assert ti.xcom["hydro_dir"] == str(tmp_path / "hydro_hmd" / "hydro")
