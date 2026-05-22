@@ -469,6 +469,15 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_database" {
   }
 }
 
+resource "snowflake_grant_privileges_to_account_role" "transformer_snowflake_database" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["IMPORTED PRIVILEGES"]
+  on_account_object {
+    object_type = "DATABASE"
+    object_name = "SNOWFLAKE"
+  }
+}
+
 resource "snowflake_grant_privileges_to_account_role" "transformer_raw_schema" {
   account_role_name = snowflake_account_role.transformer.name
   privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]

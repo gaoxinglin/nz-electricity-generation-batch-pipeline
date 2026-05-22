@@ -53,8 +53,8 @@ make local-full     # full history (2016 → now) → DuckDB → dbt run + test 
 make local-subset   # last 12 months only
 make dbt-test       # 112 dbt tests on DuckDB
 make cloud-up       # docker-compose up Airflow (needs .env + SF creds)
-make cloud-backfill # trigger Airflow backfill for full history
-make cloud-dbt-full # one-shot dbt seed + run + test on Snowflake
+make cloud-backfill # queue V2 ingestion-only history runs through last complete month
+make cloud-dbt-full # one-shot Snowflake dbt seed + full refresh + test after backfill
 make cloud-dashboard  # Streamlit against Snowflake
 ```
 
@@ -274,7 +274,9 @@ Slack alerting is optional — set `SLACK_WEBHOOK_URL` and the V2 DAG's `on_fail
 2. `cp .env.example .env` and fill `SNOWFLAKE_*`, `AWS_*`, `S3_BUCKET_NAME`.
 3. `make terraform-init && make terraform-apply` — loads `.env`, then creates DB, schemas, warehouses, RBAC, S3 bucket, IAM user.
 4. `cp dbt/profiles.yml.example dbt/profiles.yml`; the `prod` target reads env vars.
-5. `make cloud-up && make cloud-backfill`.
+5. `make cloud-up && make cloud-backfill` to queue ingestion-only V2 history runs.
+6. After those Airflow runs finish, `make cloud-dbt-full` to seed, full-refresh, and test Snowflake marts once.
+7. `make cloud-dashboard` starts Streamlit against Snowflake; it reuses `.env` locally and also accepts Streamlit `snowflake` secrets for deployment.
 
 **Host vs Docker key-path quirk**: `.env` ships `SNOWFLAKE_PRIVATE_KEY_PATH=/opt/airflow/secrets/snowflake_rsa_key.p8` (the Airflow container path). For host-side dbt or Python runs, override:
 
@@ -282,7 +284,7 @@ Slack alerting is optional — set `SLACK_WEBHOOK_URL` and the V2 DAG's `on_fail
 SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 uv run dbt debug --target prod
 ```
 
-Don't edit `.env` — Airflow inside Docker still needs the container path. See `docs/runbook.md` for the full set of dual-mode pitfalls (caught and fixed during phase 0).
+Don't edit `.env` — Airflow inside Docker still needs the container path. `make cloud-dbt-full` and `make cloud-dashboard` translate that path to `~/.ssh/snowflake_rsa_key.p8` for local host runs when the key exists. For direct host-side dbt or Python commands, use the override above. See `docs/runbook.md` for the full set of dual-mode pitfalls (caught and fixed during phase 0).
 
 ---
 

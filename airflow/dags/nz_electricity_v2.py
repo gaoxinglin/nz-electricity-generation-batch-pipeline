@@ -201,6 +201,7 @@ def generation_load_to_snowflake(**kwargs) -> None:
             )
             FILE_FORMAT = (FORMAT_NAME = 'csv_format')
             ON_ERROR = 'ABORT_STATEMENT'
+            FORCE = TRUE
         """
         cur.execute(copy_sql)
         cur.execute("COMMIT")
@@ -323,6 +324,7 @@ def nsp_load(**kwargs) -> None:
             FROM @raw_stage/nsp/NetworkSupplyPointsTable.csv
             FILE_FORMAT = (FORMAT_NAME = 'csv_format')
             ON_ERROR = 'ABORT_STATEMENT'
+            FORCE = TRUE
         """)
         loaded = cur.fetchone()[0]
         cur.execute("COMMIT")
@@ -417,6 +419,7 @@ def hydro_load(**kwargs) -> None:
                 )
                 FILE_FORMAT = (FORMAT_NAME = 'csv_format' SKIP_HEADER = 1)
                 ON_ERROR = 'CONTINUE'
+                FORCE = TRUE
             """
             cur.execute(copy_sql)
             total += cur.fetchone()[0]
@@ -560,7 +563,7 @@ with DAG(
     )
     t_dbt_run = BashOperator(
         task_id="run_dbt",
-        bash_command="cd /opt/dbt && dbt run --target prod",
+        bash_command="cd /opt/dbt && dbt seed --target prod && dbt run --target prod",
         pool="dbt_pool",
         trigger_rule=TriggerRule.NONE_FAILED,  # OK even if NSP skipped
     )

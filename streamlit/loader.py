@@ -2,7 +2,7 @@
 Dual-mode warehouse loader.
 
 NZEG_MODE=local   → DuckDB at NZEG_DUCKDB_PATH (read_only; avoids dbt write lock)
-NZEG_MODE=cloud   → Snowflake using st.secrets["snowflake"]
+NZEG_MODE=cloud   → Snowflake using st.secrets["snowflake"] or SNOWFLAKE_*
 (unset)           → defaults to local
 
 All load_*() functions return pandas DataFrames with lowercase columns. SQL is
@@ -20,6 +20,17 @@ from pathlib import Path
 import pandas as pd
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
+
+
+_SNOWFLAKE_ENV = {
+    "account": "SNOWFLAKE_ACCOUNT",
+    "user": "SNOWFLAKE_USER",
+    "private_key_path": "SNOWFLAKE_PRIVATE_KEY_PATH",
+    "database": "SNOWFLAKE_DATABASE",
+    "warehouse": "SNOWFLAKE_WAREHOUSE",
+    "role": "SNOWFLAKE_ROLE",
+}
 
 
 def _mode() -> str:
@@ -59,11 +70,36 @@ def _duckdb_conn():
         conn.close()
 
 
-def _snowflake_private_key() -> bytes:
+def _snowflake_settings() -> dict[str, str]:
+    """Prefer deployed Streamlit secrets, then fall back to local env vars."""
+    try:
+        settings = dict(st.secrets["snowflake"])
+    except (KeyError, StreamlitSecretNotFoundError):
+        settings = {}
+
+    if not settings:
+        settings = {
+            key: value
+            for key, env_name in _SNOWFLAKE_ENV.items()
+            if (value := os.environ.get(env_name))
+        }
+
+    missing = [key for key in _SNOWFLAKE_ENV if not settings.get(key)]
+    if missing:
+        env_names = ", ".join(_SNOWFLAKE_ENV[key] for key in missing)
+        secret_names = ", ".join(f"snowflake.{key}" for key in missing)
+        raise RuntimeError(
+            "Cloud dashboard Snowflake settings are incomplete. "
+            f"Set {env_names} or Streamlit secrets {secret_names}."
+        )
+    return settings
+
+
+def _snowflake_private_key(settings: dict[str, str]) -> bytes:
     from cryptography.hazmat.primitives.serialization import (
         Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
     )
-    path = os.path.expanduser(st.secrets["snowflake"]["private_key_path"])
+    path = os.path.expanduser(settings["private_key_path"])
     with open(path, "rb") as fh:
         return load_pem_private_key(fh.read(), password=None).private_bytes(
             Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
@@ -73,11 +109,11 @@ def _snowflake_private_key() -> bytes:
 @contextmanager
 def _snowflake_conn():
     import snowflake.connector
-    s = st.secrets["snowflake"]
+    s = _snowflake_settings()
     conn = snowflake.connector.connect(
         account=s["account"],
         user=s["user"],
-        private_key=_snowflake_private_key(),
+        private_key=_snowflake_private_key(s),
         database=s["database"],
         warehouse=s["warehouse"],
         role=s["role"],
