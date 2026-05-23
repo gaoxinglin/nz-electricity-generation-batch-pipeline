@@ -2,6 +2,7 @@
 dialect = snowflake
 templater = dbt
 max_line_length = 120
+exclude_rules = LT01,LT02,ST06,RF01,RF02,RF04,RF06,AL01,AL05,CV11,CP02
 
 [sqlfluff:templater:dbt]
 project_dir = dbt

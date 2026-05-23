@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
-
-import streamlit as st
 from charts import apply_layout
 from loader import load_renewable_price_impact
+
+import streamlit as st
 
 st.title("🌱 Renewable share vs wholesale price")
 st.caption(

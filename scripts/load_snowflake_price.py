@@ -34,7 +34,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 def _snowflake_connect():
     import snowflake.connector
     from cryptography.hazmat.primitives.serialization import (
-        Encoding, NoEncryption, PrivateFormat, load_pem_private_key,
+        Encoding,
+        NoEncryption,
+        PrivateFormat,
+        load_pem_private_key,
     )
 
     key_path = os.path.expanduser(os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"])

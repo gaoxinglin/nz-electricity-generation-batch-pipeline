@@ -26,7 +26,7 @@ import argparse
 import logging
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -93,7 +93,7 @@ def load_generation_file(
 
     Idempotency: DELETE WHERE trading_month=? then INSERT, all in one txn.
     """
-    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
     col_list = ", ".join(f'"{c}"' for c in GENERATION_ALL_RAW_COLUMNS)
 
     conn.execute("BEGIN TRANSACTION")
@@ -149,7 +149,7 @@ def load_price_file(
     csv_path: Path,
     trading_month: str,
 ) -> int:
-    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
     conn.execute("BEGIN TRANSACTION")
     try:
         conn.execute("DELETE FROM raw.raw_price WHERE trading_month = ?", [trading_month])
@@ -219,7 +219,7 @@ def load_nsp(db_path: Path, source_dir: Path) -> None:
     if not csv_path.exists():
         logger.warning("no NSP file at %s — skipping", csv_path)
         return
-    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
     conn = duckdb.connect(str(db_path))
     try:
         conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
@@ -300,7 +300,7 @@ def load_hydro_file(
     """
     import pandas as pd
 
-    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=timezone.utc)
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
     df = pd.read_csv(csv_path, dtype=str)
     df.columns = [c.strip() for c in df.columns]
     df = df.rename(columns=HYDRO_COLUMN_MAP)

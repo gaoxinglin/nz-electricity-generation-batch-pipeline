@@ -4,6 +4,8 @@ Entry point — sets page config and navigation only.
 Run: streamlit run streamlit/app.py
 """
 
+import os
+
 import streamlit as st
 
 st.set_page_config(
@@ -48,8 +50,6 @@ pg = st.navigation({
         st.Page("pages/pipeline_health.py", title="Pipeline Health",  icon="🩺"),
     ],
 })
-
-import os
 
 with st.sidebar:
     mode = os.environ.get("NZEG_MODE", "local").lower()
