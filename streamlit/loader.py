@@ -21,6 +21,17 @@ import pandas as pd
 from streamlit.errors import StreamlitSecretNotFoundError
 
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
+
+
+_SNOWFLAKE_ENV = {
+    "account": "SNOWFLAKE_ACCOUNT",
+    "user": "SNOWFLAKE_USER",
+    "private_key_path": "SNOWFLAKE_PRIVATE_KEY_PATH",
+    "database": "SNOWFLAKE_DATABASE",
+    "warehouse": "SNOWFLAKE_WAREHOUSE",
+    "role": "SNOWFLAKE_ROLE",
+}
 
 _SNOWFLAKE_ENV = {
     "account": "SNOWFLAKE_ACCOUNT",
