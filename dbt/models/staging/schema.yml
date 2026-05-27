@@ -90,6 +90,41 @@ models:
       Positive-spike (> var price_spike_threshold) and negative-price
       (< var negative_price_threshold) rows. Monitoring view only.
 
+  - name: stg_market_volume
+    description: >
+      Typed reconciled injection/offtake volumes. Source grain is POC x
+      participant x trading period x flow direction.
+    columns:
+      - name: market_volume_id
+        tests:
+          - not_null
+          - unique
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: trading_period
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: flow_direction
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['injection', 'offtake']
+      - name: volume_kwh
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: -100000000
+              max_value: 100000000
+              config:
+                severity: warn
+
   - name: stg_dbt_run
     description: >
       Typed dbt run-result history. Source: raw.raw_dbt_run, populated by

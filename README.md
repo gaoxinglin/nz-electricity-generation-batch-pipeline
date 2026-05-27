@@ -78,6 +78,7 @@ flowchart LR
 |---|---:|---|
 | Generation_MD | Generator x trading date x trading period | Fuel mix, plant ranking, renewable share, generation facts |
 | FinalEnergyPrices | POC x trading date x trading period | Price facts, price spikes, island spread, renewable-price analysis |
+| Reconciled injection/offtake volumes | POC x participant x trading date x trading period x flow direction | Demand/injection context for price anomaly and spike-feature analysis |
 | Network Supply Points | POC / node reference | Region and island enrichment for price and generation analysis |
 | Hydro storage | Site x date | Hydro storage trend and hydro-price driver mart |
 
@@ -145,6 +146,7 @@ For larger local validation:
 
 ```bash
 make local-subset    # approximately one year of data
+make market-subset   # one month with reconciled volume market analytics
 make local-full      # full available history
 make dbt-test        # dbt tests on DuckDB
 ```
@@ -191,6 +193,7 @@ SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 \
 RAW
   raw_generation
   raw_price
+  raw_market_volume
   raw_nsp
   raw_hydro_storage
   raw_dbt_run
@@ -198,6 +201,7 @@ RAW
 STAGING
   stg_generation
   stg_price
+  stg_market_volume
   stg_nsp
   stg_hydro_storage
   stg_dbt_run
@@ -216,6 +220,7 @@ CORE ANALYTICS
   dim_catchment
   fct_generation
   fct_price
+  fct_market_volume
   fct_hydro
   fct_dbt_run
   mart_generation_daily
@@ -225,6 +230,8 @@ CORE ANALYTICS
   mart_seasonal_pattern
   mart_price_daily
   mart_price_spike_events
+  mart_price_anomaly_events
+  mart_price_spike_features
   mart_renewable_price_impact
   mart_hydro_price_driver
   mart_warehouse_cost              # Snowflake only; depends on ACCOUNT_USAGE
@@ -236,6 +243,7 @@ The analytical marts answer these business questions:
 |---|---|
 | Generation | Daily and monthly generation by fuel, plant ranking, renewable share, seasonal behavior |
 | Wholesale price | Daily POC price, price spikes, negative prices, regional and island spread |
+| Market analytics | Reconciled offtake/injection context for price anomalies and price-spike features |
 | Cross-source analysis | Renewable share versus price, hydro storage versus price |
 | Operations | dbt model/test success rate, freshness, Snowflake warehouse usage |
 

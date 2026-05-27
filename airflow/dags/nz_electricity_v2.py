@@ -64,6 +64,7 @@ if _REPO_ROOT not in sys.path:
 
 S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "nz-electricity-generation")
 PRICE_S3_PREFIX = "raw/final_energy_prices"
+VOLUME_S3_PREFIX = "raw/reconciled_volumes"
 NSP_S3_PREFIX = "raw/nsp"
 HYDRO_S3_PREFIX = "raw/hydro_storage"
 
@@ -272,6 +273,60 @@ def price_load(**kwargs) -> None:
     ym = ti.xcom_pull(key="year_month", task_ids="price_download")
     s3_key = ti.xcom_pull(key="s3_key", task_ids="price_upload")
     rows = load_price_month(ym, s3_key.removeprefix("raw/"))  # raw_stage already at raw/
+    ti.xcom_push(key="rows_loaded", value=rows)
+
+
+# ─── Reconciled market volume branch ─────────────────────────────────
+
+
+def volume_download(**kwargs) -> None:
+    """Fetch one month of EMI reconciled injection/offtake volumes into /tmp."""
+    from pathlib import Path
+
+    from scripts.download_volume import fetch_month
+
+    dag_run = kwargs["dag_run"]
+    ym = dag_run.conf.get("year_month") or kwargs["logical_date"].strftime("%Y%m")
+    year, month = int(ym[:4]), int(ym[4:])
+    path = fetch_month(year, month, Path(tempfile.gettempdir()))
+    if path is None:
+        raise AirflowSkipException(f"volume month {ym} not yet published")
+    kwargs["ti"].xcom_push(key="local_path", value=str(path))
+    kwargs["ti"].xcom_push(key="year_month", value=ym)
+
+
+def volume_validate(**kwargs) -> None:
+    from pathlib import Path
+
+    from scripts.validate_volume import validate_file
+
+    local_path = kwargs["ti"].xcom_pull(key="local_path", task_ids="volume_download")
+    rows = validate_file(Path(local_path))
+    logger.info("volume validation OK — %d rows", rows)
+    kwargs["ti"].xcom_push(key="rows_validated", value=rows)
+
+
+def volume_upload(**kwargs) -> None:
+    ti = kwargs["ti"]
+    local_path = ti.xcom_pull(key="local_path", task_ids="volume_download")
+    ym = ti.xcom_pull(key="year_month", task_ids="volume_download")
+    filename = f"{ym}_ReconciledInjectionAndOfftake.csv.gz"
+    s3_key = f"{VOLUME_S3_PREFIX}/{filename}"
+
+    hook = S3Hook(aws_conn_id="aws_default")
+    hook.load_file(filename=local_path, key=s3_key, bucket_name=S3_BUCKET, replace=True)
+    os.remove(local_path)
+    logger.info("uploaded to s3://%s/%s", S3_BUCKET, s3_key)
+    ti.xcom_push(key="s3_key", value=s3_key)
+
+
+def volume_load(**kwargs) -> None:
+    from scripts.load_snowflake_volume import load_volume_month
+
+    ti = kwargs["ti"]
+    ym = ti.xcom_pull(key="year_month", task_ids="volume_download")
+    s3_key = ti.xcom_pull(key="s3_key", task_ids="volume_upload")
+    rows = load_volume_month(ym, s3_key.removeprefix("raw/"))  # raw_stage already at raw/
     ti.xcom_push(key="rows_loaded", value=rows)
 
 
@@ -546,6 +601,16 @@ with DAG(
     p_upload = PythonOperator(task_id="price_upload", python_callable=price_upload)
     p_load = PythonOperator(task_id="price_load", python_callable=price_load)
 
+    # Reconciled market volume branch
+    v_download = PythonOperator(
+        task_id="volume_download",
+        python_callable=volume_download,
+        pool="emi_download_pool",
+    )
+    v_validate = PythonOperator(task_id="volume_validate", python_callable=volume_validate)
+    v_upload = PythonOperator(task_id="volume_upload", python_callable=volume_upload)
+    v_load = PythonOperator(task_id="volume_load", python_callable=volume_load)
+
     # NSP branch — best-effort (NONE_FAILED downstream so dbt still runs)
     n_download = PythonOperator(
         task_id="nsp_download",
@@ -608,7 +673,8 @@ with DAG(
     # Wiring
     g_download >> g_validate >> g_upload >> g_load
     p_download >> p_validate >> p_upload >> p_load
+    v_download >> v_validate >> v_upload >> v_load
     n_download >> n_upload >> n_load
     h_download >> h_upload >> h_load
 
-    [g_load, p_load, n_load, h_load] >> t_check_dbt >> t_init_raw_dbt_run >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts
+    [g_load, p_load, v_load, n_load, h_load] >> t_check_dbt >> t_init_raw_dbt_run >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts

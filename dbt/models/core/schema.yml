@@ -155,6 +155,36 @@ models:
             - trading_date
             - tp_number
 
+  - name: fct_market_volume
+    description: >
+      Reconciled market volumes aggregated to POC x trading date x trading
+      period. Injection and offtake are separate measures.
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: injection_kwh
+        tests:
+          - not_null
+      - name: offtake_kwh
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+
   - name: int_price_daily
     description: >
       Grain poc_code × trading_date × tp_number, with daily POC-level mean
@@ -284,6 +314,64 @@ models:
           - dbt_expectations.expect_column_values_to_be_between:
               min_value: 300
               max_value: 20000
+
+  - name: mart_price_anomaly_events
+    description: >
+      Price anomalies enriched with rolling price context and reconciled
+      injection/offtake volumes. Includes threshold spikes, negative prices,
+      and statistical outliers.
+    columns:
+      - name: trading_date
+        tests:
+          - not_null
+      - name: poc_code
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: anomaly_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['positive_spike', 'negative_price', 'statistical_outlier']
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+            - anomaly_type
+
+  - name: mart_price_spike_features
+    description: >
+      Feature table for price spike prediction experiments. Target column is
+      is_price_spike.
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+      - name: is_price_spike
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
 
   - name: mart_renewable_price_impact
     description: "Per (POC × date × tp): renewable share vs wholesale price."

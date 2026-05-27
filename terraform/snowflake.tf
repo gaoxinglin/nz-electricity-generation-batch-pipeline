@@ -370,6 +370,63 @@ resource "snowflake_table" "raw_price" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_market_volume (11 columns) — market expansion
+# 9 source columns (all VARCHAR) + trading_month
+# + _source_file_modified_at.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_market_volume" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_MARKET_VOLUME"
+
+  column {
+    name = "POINT_OF_CONNECTION"
+    type = "VARCHAR"
+  }
+  column {
+    name = "NETWORK"
+    type = "VARCHAR"
+  }
+  column {
+    name = "ISLAND"
+    type = "VARCHAR"
+  }
+  column {
+    name = "PARTICIPANT"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_DATE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_PERIOD"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_PERIOD_START_TIME"
+    type = "VARCHAR"
+  }
+  column {
+    name = "FLOW_DIRECTION"
+    type = "VARCHAR"
+  }
+  column {
+    name = "KILOWATT_HOURS"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_MONTH"
+    type = "VARCHAR"
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Table: raw_nsp (28 columns) — Phase 2
 # The 27 published columns are kept as VARCHAR; stg_nsp does the cast +
 # Current-flag filter. + _source_file_modified_at.

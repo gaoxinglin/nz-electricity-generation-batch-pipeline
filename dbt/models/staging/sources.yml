@@ -35,6 +35,13 @@ sources:
           7 was incorrect — Island/IsProxyPriceFlag/PublishDateTime do not
           exist in the actual file). raw_price table = 4 source cols
           (all VARCHAR, lowercased) + trading_month + _source_file_modified_at.
+      - name: raw_market_volume
+        description: >
+          Raw EMI reconciled injection/offtake volumes.
+          Source CSV columns: PointOfConnection, Network, Island, Participant,
+          TradingDate, TradingPeriod, TradingPeriodStartTime, FlowDirection,
+          KilowattHours. raw_market_volume keeps them as VARCHAR plus
+          trading_month and _source_file_modified_at.
       - name: raw_hydro_storage
         description: >
           Raw EMI Hydrological Modelling Dataset (HMD) — storage section.

@@ -1,4 +1,4 @@
-.PHONY: demo local-full local-subset dbt-test terraform-init terraform-plan terraform-apply \
+.PHONY: demo local-full local-subset market-subset dbt-test terraform-init terraform-plan terraform-apply \
         cloud-up cloud-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
         backfill dbt-full
 
@@ -52,6 +52,17 @@ local-subset:            ## 1 年数据子集（中等规模验证）
 	    --target duckdb --db data/nzeg.duckdb
 	cd dbt && uv run dbt run --profiles-dir . --target dev --select stg_dbt_run fct_dbt_run
 	NZEG_MODE=local uv run streamlit run streamlit/app.py
+
+market-subset:           ## 市场分析扩展：1 个月 generation + price + reconciled volume
+	uv run python scripts/download_generation.py --output data/raw/ --months 1
+	uv run python scripts/download_price.py --output data/raw/ --months 1 || true
+	uv run python scripts/download_volume.py --output data/raw/ --months 1 || true
+	uv run python scripts/download_nsp.py --output data/raw/ || true
+	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
+	uv run python scripts/ingest_dbt_artifacts.py --init --target duckdb --db data/nzeg.duckdb
+	cd dbt && uv run dbt seed --profiles-dir . --target dev \
+	    && uv run dbt run --profiles-dir . --target dev \
+	    && uv run dbt test --profiles-dir . --target dev
 
 dbt-test:                ## 单独跑 dbt test (DuckDB)
 	cd dbt && uv run dbt test --profiles-dir . --target dev

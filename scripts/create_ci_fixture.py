@@ -5,6 +5,7 @@ The fixture intentionally mirrors the public EMI CSV shapes, but stays tiny
 enough for GitHub Actions:
   - one month of wide Generation_MD rows
   - one month of FinalEnergyPrices rows
+  - one month of ReconciledInjectionAndOfftake rows
   - current NSP rows for the fixture POCs
   - one hydro storage lake file
 
@@ -81,6 +82,18 @@ PRICE_HEADER = [
     "TradingPeriod",
     "PointOfConnection",
     "DollarsPerMegawattHour",
+]
+
+MARKET_VOLUME_HEADER = [
+    "PointOfConnection",
+    "Network",
+    "Island",
+    "Participant",
+    "TradingDate",
+    "TradingPeriod",
+    "TradingPeriodStartTime",
+    "FlowDirection",
+    "KilowattHours",
 ]
 
 NSP_HEADER = [
@@ -167,6 +180,42 @@ def price_rows() -> list[list[object]]:
                     tp,
                     poc_code,
                     f"{price:.2f}",
+                ])
+    return rows
+
+
+def market_volume_rows() -> list[list[object]]:
+    rows: list[list[object]] = []
+    for trading_date in TRADING_DATES:
+        for poc_code, network, island, participant, base_offtake in [
+            ("POC_NI", "NWK_NI", "NI", "CI_NORTH", 2200),
+            ("POC_SI", "NWK_SI", "SI", "CI_SOUTH", 1500),
+        ]:
+            for tp in TRADING_PERIODS:
+                offtake = base_offtake + trading_date.day * 9 + tp * 4
+                if poc_code == "POC_NI" and trading_date.day == 15 and tp == 18:
+                    offtake = 3900
+                rows.append([
+                    poc_code,
+                    network,
+                    island,
+                    participant,
+                    trading_date.isoformat(),
+                    tp,
+                    f"{(tp - 1) // 2:02d}:{'30' if tp % 2 == 0 else '00'}",
+                    "Offtake",
+                    f"{offtake:.1f}",
+                ])
+                rows.append([
+                    poc_code,
+                    network,
+                    island,
+                    participant,
+                    trading_date.isoformat(),
+                    tp,
+                    f"{(tp - 1) // 2:02d}:{'30' if tp % 2 == 0 else '00'}",
+                    "Injection",
+                    f"{offtake * 0.82:.1f}",
                 ])
     return rows
 
@@ -259,6 +308,11 @@ def create_fixture(output_dir: Path) -> None:
         output_dir / f"{TRADING_MONTH}_FinalEnergyPrices.csv",
         PRICE_HEADER,
         price_rows(),
+    )
+    write_csv(
+        output_dir / f"{TRADING_MONTH}_ReconciledInjectionAndOfftake.csv",
+        MARKET_VOLUME_HEADER,
+        market_volume_rows(),
     )
     write_csv(output_dir / "NetworkSupplyPointsTable.csv", NSP_HEADER, nsp_rows())
     write_csv(
