@@ -1,8 +1,6 @@
 {{
     config(
-        materialized='incremental',
-        unique_key=['poc_code', 'trading_date', 'tp_number', 'anomaly_type'],
-        incremental_strategy='delete+insert'
+        materialized='table'
     )
 }}
 
@@ -13,6 +11,10 @@
     reconciled demand/injection measures. It intentionally stays SQL-based;
     the ML feature mart can build on the same inputs without making anomaly
     monitoring depend on a Python model.
+
+    Materialized as a full table so corrected prices can remove previously
+    flagged anomalies. An incremental anomaly-only table would leave stale
+    rows when a corrected price no longer breaches any anomaly rule.
 */
 
 WITH price AS (
@@ -24,13 +26,6 @@ WITH price AS (
         pricing_regime,
         is_proxy
     FROM {{ ref('fct_price') }}
-
-    {% if is_incremental() %}
-        WHERE trading_date >= (
-            SELECT {{ dbt.dateadd('day', -var('lookback_days'), "COALESCE(MAX(trading_date), CAST('1900-01-01' AS DATE))") }}
-            FROM {{ this }}
-        )
-    {% endif %}
 ),
 
 with_context AS (

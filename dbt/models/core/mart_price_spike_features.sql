@@ -1,8 +1,6 @@
 {{
     config(
-        materialized='incremental',
-        unique_key=['poc_code', 'trading_date', 'tp_number'],
-        incremental_strategy='delete+insert'
+        materialized='table'
     )
 }}
 
@@ -12,17 +10,13 @@
     Target: is_price_spike = price_nzd_mwh > var('price_spike_threshold').
     This mart is intentionally model-agnostic: Python, Snowpark ML, or a BI
     notebook can consume the same stable feature grain.
+
+    Materialized as a full table so lag and rolling-window features are
+    identical between scheduled runs and full refreshes.
 */
 
 WITH price AS (
     SELECT * FROM {{ ref('fct_price') }}
-
-    {% if is_incremental() %}
-        WHERE trading_date >= (
-            SELECT {{ dbt.dateadd('day', -var('lookback_days'), "COALESCE(MAX(trading_date), CAST('1900-01-01' AS DATE))") }}
-            FROM {{ this }}
-        )
-    {% endif %}
 ),
 
 gen_share AS (

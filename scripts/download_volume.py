@@ -124,17 +124,20 @@ def latest_blob_for_month(year: int, month: int) -> str | None:
     return sorted(names)[-1]
 
 
-def fetch_month(year: int, month: int, output_dir: Path) -> Path | None:
+def fetch_month(year: int, month: int, output_dir: Path, force: bool = False) -> Path | None:
     year_month = f"{year}{month:02d}"
     dest = output_dir / f"{year_month}_ReconciledInjectionAndOfftake.csv.gz"
-    if dest.exists() and dest.stat().st_size > 0:
-        logger.info("skip (present): %s", dest.name)
-        return dest
+    source_marker = output_dir / f"{dest.name}.source"
 
     blob_name = latest_blob_for_month(year, month)
     if blob_name is None:
         logger.warning("no reconciled volume file found for %s", year_month)
         return None
+
+    if dest.exists() and dest.stat().st_size > 0 and source_marker.exists() and not force:
+        if source_marker.read_text(encoding="utf-8").strip() == blob_name:
+            logger.info("skip (present): %s", dest.name)
+            return dest
 
     url = f"{CONTAINER_URL}/{blob_name}"
     resp = _retry_get(url)
@@ -143,6 +146,7 @@ def fetch_month(year: int, month: int, output_dir: Path) -> Path | None:
         return None
 
     dest.write_bytes(resp.content)
+    source_marker.write_text(f"{blob_name}\n", encoding="utf-8")
     logger.info("downloaded %s -> %s (%d bytes)", blob_name, dest.name, len(resp.content))
     return dest
 
@@ -150,6 +154,7 @@ def fetch_month(year: int, month: int, output_dir: Path) -> Path | None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download EMI reconciled injection/offtake volumes")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--force", action="store_true", help="Re-download even when the latest discovered blob is present")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--months", type=int)
     group.add_argument("--years", type=int)
@@ -163,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
 
     fetched = 0
     for y, m in targets:
-        if fetch_month(y, m, output) is not None:
+        if fetch_month(y, m, output, force=args.force) is not None:
             fetched += 1
     logger.info("done - %d/%d months fetched", fetched, len(targets))
     return 0

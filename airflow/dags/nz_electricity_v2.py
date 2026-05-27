@@ -288,7 +288,7 @@ def volume_download(**kwargs) -> None:
     dag_run = kwargs["dag_run"]
     ym = dag_run.conf.get("year_month") or kwargs["logical_date"].strftime("%Y%m")
     year, month = int(ym[:4]), int(ym[4:])
-    path = fetch_month(year, month, Path(tempfile.gettempdir()))
+    path = fetch_month(year, month, Path(tempfile.gettempdir()), force=True)
     if path is None:
         raise AirflowSkipException(f"volume month {ym} not yet published")
     kwargs["ti"].xcom_push(key="local_path", value=str(path))
