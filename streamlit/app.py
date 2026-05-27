@@ -40,6 +40,7 @@ pg = st.navigation({
     "Wholesale Price (V2)": [
         st.Page("pages/price_overview.py",  title="Price Overview",   icon="⚡"),
         st.Page("pages/price_spikes.py",    title="Price Spikes",     icon="🔺"),
+        st.Page("pages/market_context.py",  title="Market Context",   icon="📉"),
         st.Page("pages/renewable_price.py", title="Renewable vs Price", icon="🌿"),
         st.Page("pages/island_spread.py",   title="Island Spread",    icon="🏝️"),
     ],

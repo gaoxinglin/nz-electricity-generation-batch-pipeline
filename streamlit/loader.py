@@ -245,6 +245,85 @@ def load_renewable_price_impact() -> pd.DataFrame:
     return df
 
 
+def load_market_spike_context(limit: int | None = None) -> pd.DataFrame:
+    """Spike-level context from mart_price_offer_context joined to dim_node."""
+    limit_sql = "" if limit is None else f"LIMIT {max(1, int(limit))}"
+    df = _q(f"""
+        SELECT
+            c.trading_date,
+            c.poc_code,
+            c.tp_number,
+            c.price_nzd_mwh,
+            c.pricing_regime,
+            c.is_proxy,
+            c.injection_kwh,
+            c.offtake_kwh,
+            c.net_injection_kwh,
+            c.injection_mw,
+            c.offtake_mw,
+            c.offer_tranche_count,
+            c.offer_participant_count,
+            c.offer_unit_count,
+            c.total_offered_mw,
+            c.offered_mw_at_or_below_0,
+            c.offered_mw_at_or_below_100,
+            c.offered_mw_at_or_below_300,
+            c.offered_mw_at_or_below_500,
+            c.min_offer_price_nzd_mwh,
+            c.max_offer_price_nzd_mwh,
+            c.avg_offer_price_nzd_mwh,
+            c.weighted_avg_offer_price_nzd_mwh,
+            c.cheap_offer_share_below_300,
+            c.offered_to_offtake_ratio,
+            n.island,
+            n.region,
+            n.zone
+        FROM {_analytics()}.mart_price_offer_context AS c
+        LEFT JOIN {_analytics()}.dim_node AS n
+            ON c.poc_code = n.poc_code
+        WHERE c.price_nzd_mwh > 300
+        ORDER BY c.trading_date DESC, c.price_nzd_mwh DESC, c.tp_number, c.poc_code
+        {limit_sql}
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
+    return df
+
+
+def load_market_context_window(
+    poc_code: str,
+    trading_date: str,
+    start_tp: int,
+    end_tp: int,
+) -> pd.DataFrame:
+    """Trading-period context for one POC/day around a selected event."""
+    safe_poc = poc_code.replace("'", "''")
+    safe_date = trading_date.replace("'", "''")
+    start_tp = max(1, int(start_tp))
+    end_tp = min(50, int(end_tp))
+    df = _q(f"""
+        SELECT
+            trading_date,
+            poc_code,
+            tp_number,
+            price_nzd_mwh,
+            injection_mw,
+            offtake_mw,
+            total_offered_mw,
+            offered_mw_at_or_below_100,
+            offered_mw_at_or_below_300,
+            weighted_avg_offer_price_nzd_mwh,
+            cheap_offer_share_below_300,
+            offered_to_offtake_ratio
+        FROM {_analytics()}.mart_price_offer_context
+        WHERE poc_code = '{safe_poc}'
+          AND CAST(trading_date AS DATE) = CAST('{safe_date}' AS DATE)
+          AND tp_number BETWEEN {start_tp} AND {end_tp}
+        ORDER BY tp_number
+    """)
+    df["trading_date"] = pd.to_datetime(df["trading_date"])
+    return df
+
+
 # ─── Observability (Phase 5) ──────────────────────────────────────────
 
 
