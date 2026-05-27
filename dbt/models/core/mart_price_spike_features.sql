@@ -34,6 +34,10 @@ gen_share AS (
     GROUP BY poc_code, trading_date, tp_number
 ),
 
+offer_curve AS (
+    SELECT * FROM {{ ref('mart_offer_curve') }}
+),
+
 base AS (
     SELECT
         p.poc_code,
@@ -45,6 +49,14 @@ base AS (
         v.injection_kwh,
         v.offtake_kwh,
         v.net_injection_kwh,
+        oc.offer_tranche_count,
+        oc.offer_participant_count,
+        oc.offer_unit_count,
+        oc.total_offered_mw,
+        oc.offered_mw_at_or_below_100,
+        oc.offered_mw_at_or_below_300,
+        oc.weighted_avg_offer_price_nzd_mwh,
+        oc.cheap_offer_share_below_300,
         g.generation_kwh,
         g.renewable_generation_kwh,
         g.renewable_pct,
@@ -60,6 +72,10 @@ base AS (
         ON p.poc_code = v.poc_code
         AND p.trading_date = v.trading_date
         AND p.tp_number = v.tp_number
+    LEFT JOIN offer_curve AS oc
+        ON p.poc_code = oc.poc_code
+        AND p.trading_date = oc.trading_date
+        AND p.tp_number = oc.tp_number
     LEFT JOIN gen_share AS g
         ON p.poc_code = g.poc_code
         AND p.trading_date = g.trading_date
@@ -110,6 +126,14 @@ SELECT
     offtake_kwh,
     net_injection_kwh,
     rolling_7d_avg_offtake_kwh,
+    offer_tranche_count,
+    offer_participant_count,
+    offer_unit_count,
+    total_offered_mw,
+    offered_mw_at_or_below_100,
+    offered_mw_at_or_below_300,
+    weighted_avg_offer_price_nzd_mwh,
+    cheap_offer_share_below_300,
     generation_kwh,
     renewable_generation_kwh,
     renewable_pct,

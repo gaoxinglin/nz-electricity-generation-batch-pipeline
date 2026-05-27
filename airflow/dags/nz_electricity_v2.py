@@ -1,5 +1,5 @@
 """
-NZ Electricity V2 — Monthly Batch DAG (Generation + Price + NSP).
+NZ Electricity V2 — Monthly Batch DAG (Generation + Price + market datasets + NSP).
 
 Topology (PRD §6.1):
 
@@ -41,7 +41,7 @@ import logging
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
@@ -65,6 +65,7 @@ if _REPO_ROOT not in sys.path:
 S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "nz-electricity-generation")
 PRICE_S3_PREFIX = "raw/final_energy_prices"
 VOLUME_S3_PREFIX = "raw/reconciled_volumes"
+OFFERS_S3_PREFIX = "raw/offers"
 NSP_S3_PREFIX = "raw/nsp"
 HYDRO_S3_PREFIX = "raw/hydro_storage"
 
@@ -327,6 +328,80 @@ def volume_load(**kwargs) -> None:
     ym = ti.xcom_pull(key="year_month", task_ids="volume_download")
     s3_key = ti.xcom_pull(key="s3_key", task_ids="volume_upload")
     rows = load_volume_month(ym, s3_key.removeprefix("raw/"))  # raw_stage already at raw/
+    ti.xcom_push(key="rows_loaded", value=rows)
+
+
+# ─── Offers branch (optional, opt-in) ────────────────────────────────
+# Daily offer files are large, so scheduled monthly runs do not ingest them
+# unless explicitly enabled with DAG conf {"include_offers": true}. By
+# default the branch loads the first day of the requested year_month; pass
+# {"offer_date": "YYYYMMDD"} to load a different day.
+
+
+def offers_enabled(**kwargs) -> bool:
+    dag_run = kwargs["dag_run"]
+    conf = dag_run.conf or {}
+    env_enabled = os.environ.get("NZEG_INCLUDE_OFFERS", "").lower() in {"1", "true", "yes"}
+    return bool(conf.get("include_offers") or env_enabled)
+
+
+def _offer_day_from_conf(**kwargs) -> date:
+    dag_run = kwargs["dag_run"]
+    conf = dag_run.conf or {}
+    offer_date = conf.get("offer_date")
+    if offer_date:
+        return date(int(offer_date[:4]), int(offer_date[4:6]), int(offer_date[6:]))
+    ym = conf.get("year_month") or kwargs["logical_date"].strftime("%Y%m")
+    return date(int(ym[:4]), int(ym[4:]), 1)
+
+
+def offers_download(**kwargs) -> None:
+    """Fetch one daily EMI Offers file into /tmp."""
+    from pathlib import Path
+
+    from scripts.download_offers import fetch_day
+
+    trading_day = _offer_day_from_conf(**kwargs)
+    path = fetch_day(trading_day, Path(tempfile.gettempdir()), force=True)
+    if path is None:
+        raise AirflowSkipException(f"offers day {trading_day:%Y%m%d} not yet published")
+    kwargs["ti"].xcom_push(key="local_path", value=str(path))
+    kwargs["ti"].xcom_push(key="trading_day", value=f"{trading_day:%Y%m%d}")
+
+
+def offers_validate(**kwargs) -> None:
+    from pathlib import Path
+
+    from scripts.validate_offers import validate_file
+
+    local_path = kwargs["ti"].xcom_pull(key="local_path", task_ids="offers_download")
+    rows = validate_file(Path(local_path))
+    logger.info("offers validation OK — %d rows", rows)
+    kwargs["ti"].xcom_push(key="rows_validated", value=rows)
+
+
+def offers_upload(**kwargs) -> None:
+    ti = kwargs["ti"]
+    local_path = ti.xcom_pull(key="local_path", task_ids="offers_download")
+    trading_day = ti.xcom_pull(key="trading_day", task_ids="offers_download")
+    filename = f"{trading_day}_Offers.csv"
+    s3_key = f"{OFFERS_S3_PREFIX}/{filename}"
+
+    hook = S3Hook(aws_conn_id="aws_default")
+    hook.load_file(filename=local_path, key=s3_key, bucket_name=S3_BUCKET, replace=True)
+    os.remove(local_path)
+    logger.info("uploaded to s3://%s/%s", S3_BUCKET, s3_key)
+    ti.xcom_push(key="s3_key", value=s3_key)
+
+
+def offers_load(**kwargs) -> None:
+    from scripts.load_snowflake_offers import load_offer_day
+
+    ti = kwargs["ti"]
+    trading_day = ti.xcom_pull(key="trading_day", task_ids="offers_download")
+    s3_key = ti.xcom_pull(key="s3_key", task_ids="offers_upload")
+    day = date(int(trading_day[:4]), int(trading_day[4:6]), int(trading_day[6:]))
+    rows = load_offer_day(day, s3_key.removeprefix("raw/"))  # raw_stage already at raw/
     ti.xcom_push(key="rows_loaded", value=rows)
 
 
@@ -611,6 +686,21 @@ with DAG(
     v_upload = PythonOperator(task_id="volume_upload", python_callable=volume_upload)
     v_load = PythonOperator(task_id="volume_load", python_callable=volume_load)
 
+    # Offers branch — large daily files, disabled unless include_offers is true
+    o_enabled = ShortCircuitOperator(
+        task_id="offers_enabled",
+        python_callable=offers_enabled,
+        ignore_downstream_trigger_rules=False,
+    )
+    o_download = PythonOperator(
+        task_id="offers_download",
+        python_callable=offers_download,
+        pool="emi_download_pool",
+    )
+    o_validate = PythonOperator(task_id="offers_validate", python_callable=offers_validate)
+    o_upload = PythonOperator(task_id="offers_upload", python_callable=offers_upload)
+    o_load = PythonOperator(task_id="offers_load", python_callable=offers_load)
+
     # NSP branch — best-effort (NONE_FAILED downstream so dbt still runs)
     n_download = PythonOperator(
         task_id="nsp_download",
@@ -631,7 +721,9 @@ with DAG(
 
     # dbt
     t_check_dbt = ShortCircuitOperator(
-        task_id="check_run_dbt", python_callable=check_run_dbt
+        task_id="check_run_dbt",
+        python_callable=check_run_dbt,
+        trigger_rule=TriggerRule.NONE_FAILED,
     )
     # Pre-create raw_dbt_run table so the first DAG run on a new SF account
     # doesn't fail stg_dbt_run/fct_dbt_run on missing source — that failure
@@ -674,7 +766,8 @@ with DAG(
     g_download >> g_validate >> g_upload >> g_load
     p_download >> p_validate >> p_upload >> p_load
     v_download >> v_validate >> v_upload >> v_load
+    o_enabled >> o_download >> o_validate >> o_upload >> o_load
     n_download >> n_upload >> n_load
     h_download >> h_upload >> h_load
 
-    [g_load, p_load, v_load, n_load, h_load] >> t_check_dbt >> t_init_raw_dbt_run >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts
+    [g_load, p_load, v_load, o_load, n_load, h_load] >> t_check_dbt >> t_init_raw_dbt_run >> t_dbt_run >> t_dbt_test >> t_ingest_artifacts

@@ -42,6 +42,13 @@ sources:
           TradingDate, TradingPeriod, TradingPeriodStartTime, FlowDirection,
           KilowattHours. raw_market_volume keeps them as VARCHAR plus
           trading_month and _source_file_modified_at.
+      - name: raw_offers
+        description: >
+          Raw EMI daily Offers files. Source CSV columns include TradingDate,
+          TradingPeriod, ParticipantCode, PointOfConnection, Unit, product
+          metadata, submission metadata, tranche, Megawatts, and
+          DollarsPerMegawattHour. raw_offers keeps source columns as VARCHAR
+          plus trading_month and _source_file_modified_at.
       - name: raw_hydro_storage
         description: >
           Raw EMI Hydrological Modelling Dataset (HMD) — storage section.

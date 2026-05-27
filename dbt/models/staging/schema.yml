@@ -125,6 +125,60 @@ models:
               config:
                 severity: warn
 
+  - name: stg_energy_offer
+    description: >
+      Typed latest Energy/Injection offer rows from the daily EMI Offers files.
+      Grain is participant x POC x unit x trading period x tranche after
+      de-duplicating to the latest submission.
+    columns:
+      - name: offer_id
+        tests:
+          - not_null
+          - unique
+      - name: participant_code
+        tests:
+          - not_null
+      - name: poc_code
+        tests:
+          - not_null
+      - name: unit
+        tests:
+          - not_null
+      - name: product_type
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['energy']
+      - name: product_class
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['injection']
+      - name: trading_date
+        tests:
+          - not_null
+      - name: trading_period
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: is_latest
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true]
+              quote: false
+      - name: tranche
+        tests:
+          - not_null
+      - name: offer_mw
+        tests:
+          - not_null
+      - name: offer_price_nzd_mwh
+        tests:
+          - not_null
+
   - name: stg_dbt_run
     description: >
       Typed dbt run-result history. Source: raw.raw_dbt_run, populated by

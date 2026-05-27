@@ -427,6 +427,41 @@ resource "snowflake_table" "raw_market_volume" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_offers (23 columns) — market expansion
+# 21 source columns (all VARCHAR) + trading_month
+# + _source_file_modified_at. Daily files are large, so ingestion is
+# normally opt-in and date-scoped.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_offers" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_OFFERS"
+
+  dynamic "column" {
+    for_each = [
+      "TRADING_DATE", "TRADING_PERIOD", "PARTICIPANT_CODE",
+      "POINT_OF_CONNECTION", "UNIT", "PRODUCT_TYPE", "PRODUCT_CLASS",
+      "RESERVE_TYPE", "PRODUCT_DESCRIPTION", "UTC_SUBMISSION_DATE",
+      "UTC_SUBMISSION_TIME", "SUBMISSION_ORDER", "IS_LATEST_YES_NO",
+      "TRANCHE", "MAXIMUM_RAMP_UP_MW_PER_HOUR",
+      "MAXIMUM_RAMP_DOWN_MW_PER_HOUR",
+      "PARTIALLY_LOADED_SPINNING_RESERVE_PERCENT", "MAXIMUM_OUTPUT_MW",
+      "FORECAST_GENERATION_POTENTIAL_MW", "MEGAWATTS", "DOLLARS_PER_MWH",
+      "TRADING_MONTH",
+    ]
+    content {
+      name = column.value
+      type = "VARCHAR"
+    }
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Table: raw_nsp (28 columns) — Phase 2
 # The 27 published columns are kept as VARCHAR; stg_nsp does the cast +
 # Current-flag filter. + _source_file_modified_at.

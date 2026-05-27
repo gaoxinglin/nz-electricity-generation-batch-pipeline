@@ -1,4 +1,4 @@
-.PHONY: demo local-full local-subset market-subset dbt-test terraform-init terraform-plan terraform-apply \
+.PHONY: demo local-full local-subset market-subset offer-sample dbt-test terraform-init terraform-plan terraform-apply \
         cloud-up cloud-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
         backfill dbt-full
 
@@ -63,6 +63,14 @@ market-subset:           ## 市场分析扩展：1 个月 generation + price + r
 	cd dbt && uv run dbt seed --profiles-dir . --target dev \
 	    && uv run dbt run --profiles-dir . --target dev \
 	    && uv run dbt test --profiles-dir . --target dev
+
+offer-sample:            ## Offers 扩展：下载最近 1 个完整交易日（文件较大）
+	uv run python scripts/download_offers.py --output data/raw/ --days 1 || true
+	uv run python scripts/load_local.py --db data/nzeg.duckdb --source data/raw/
+	uv run python scripts/ingest_dbt_artifacts.py --init --target duckdb --db data/nzeg.duckdb
+	cd dbt && uv run dbt seed --profiles-dir . --target dev \
+	    && uv run dbt run --profiles-dir . --target dev --select stg_energy_offer fct_offer_stack mart_offer_curve mart_price_offer_context mart_price_spike_features \
+	    && uv run dbt test --profiles-dir . --target dev --select stg_energy_offer fct_offer_stack mart_offer_curve mart_price_offer_context test_fct_offer_stack_staging_reconciliation
 
 dbt-test:                ## 单独跑 dbt test (DuckDB)
 	cd dbt && uv run dbt test --profiles-dir . --target dev

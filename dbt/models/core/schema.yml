@@ -185,6 +185,94 @@ models:
             - trading_date
             - tp_number
 
+  - name: fct_offer_stack
+    description: >
+      Latest Energy/Injection offer stack at POC x trading date x trading
+      period x participant x unit x tranche grain.
+    columns:
+      - name: offer_id
+        tests:
+          - not_null
+          - unique
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+          - dbt_expectations.expect_column_values_to_be_between:
+              min_value: 1
+              max_value: 50
+      - name: offer_mw
+        tests:
+          - not_null
+      - name: offer_price_nzd_mwh
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - participant_code
+            - poc_code
+            - unit
+            - trading_date
+            - tp_number
+            - tranche
+
+  - name: mart_offer_curve
+    description: >
+      POC x trading date x trading period offer-curve summary. Compresses raw
+      daily Offers into compact price-context features.
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: total_offered_mw
+        tests:
+          - not_null
+      - name: offer_tranche_count
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+
+  - name: mart_price_offer_context
+    description: >
+      Price fact rows enriched with offer-curve and reconciled volume context.
+      Used for BI drill-down and later price-spike modelling.
+    columns:
+      - name: poc_code
+        tests:
+          - not_null
+      - name: trading_date
+        tests:
+          - not_null
+      - name: tp_number
+        tests:
+          - not_null
+      - name: price_nzd_mwh
+        tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - poc_code
+            - trading_date
+            - tp_number
+
   - name: int_price_daily
     description: >
       Grain poc_code × trading_date × tp_number, with daily POC-level mean

@@ -6,6 +6,7 @@ enough for GitHub Actions:
   - one month of wide Generation_MD rows
   - one month of FinalEnergyPrices rows
   - one month of ReconciledInjectionAndOfftake rows
+  - one day of Offers rows
   - current NSP rows for the fixture POCs
   - one hydro storage lake file
 
@@ -94,6 +95,30 @@ MARKET_VOLUME_HEADER = [
     "TradingPeriodStartTime",
     "FlowDirection",
     "KilowattHours",
+]
+
+OFFERS_HEADER = [
+    "TradingDate",
+    "TradingPeriod",
+    "ParticipantCode",
+    "PointOfConnection",
+    "Unit",
+    "ProductType",
+    "ProductClass",
+    "ReserveType",
+    "ProductDescription",
+    "UTCSubmissionDate",
+    "UTCSubmissionTime",
+    "SubmissionOrder",
+    "IsLatestYesNo",
+    "Tranche",
+    "MaximumRampUpMegawattsPerHour",
+    "MaximumRampDownMegawattsPerHour",
+    "PartiallyLoadedSpinningReservePercent",
+    "MaximumOutputMegawatts",
+    "ForecastOfGenerationPotentialMegawatts",
+    "Megawatts",
+    "DollarsPerMegawattHour",
 ]
 
 NSP_HEADER = [
@@ -220,6 +245,70 @@ def market_volume_rows() -> list[list[object]]:
     return rows
 
 
+def offer_rows() -> list[list[object]]:
+    rows: list[list[object]] = []
+    trading_date = date(YEAR, MONTH, 15)
+    for poc_code, participant, unit, base_mw in [
+        ("POC_NI", "CI_NORTH", "NI_UNIT_1", 95.0),
+        ("POC_SI", "CI_SOUTH", "SI_UNIT_1", 70.0),
+    ]:
+        for tp in TRADING_PERIODS:
+            for tranche, price_adder in [(1, 0.0), (2, 75.0), (3, 240.0)]:
+                price = 45.0 + price_adder + tp * 0.15
+                mw = base_mw + tranche * 12 + tp * 0.2
+                if poc_code == "POC_NI" and tp == 18 and tranche == 3:
+                    price = 520.0
+                    mw = 35.0
+                rows.append([
+                    trading_date.isoformat(),
+                    tp,
+                    participant,
+                    poc_code,
+                    unit,
+                    "Energy",
+                    "Injection",
+                    "",
+                    "Energy injection at a point of connection",
+                    "2024-01-14",
+                    "11:10:02.000",
+                    2,
+                    "Y",
+                    tranche,
+                    "999.000",
+                    "999.000",
+                    "",
+                    f"{base_mw + 60:.3f}",
+                    "",
+                    f"{mw:.3f}",
+                    f"{price:.2f}",
+                ])
+
+            rows.append([
+                trading_date.isoformat(),
+                tp,
+                participant,
+                poc_code,
+                unit,
+                "Energy",
+                "Injection",
+                "",
+                "Energy injection at a point of connection",
+                "2024-01-14",
+                "10:55:00.000",
+                1,
+                "N",
+                1,
+                "999.000",
+                "999.000",
+                "",
+                f"{base_mw + 60:.3f}",
+                "",
+                f"{base_mw:.3f}",
+                "999.00",
+            ])
+    return rows
+
+
 def nsp_rows() -> list[list[object]]:
     return [
         [
@@ -313,6 +402,11 @@ def create_fixture(output_dir: Path) -> None:
         output_dir / f"{TRADING_MONTH}_ReconciledInjectionAndOfftake.csv",
         MARKET_VOLUME_HEADER,
         market_volume_rows(),
+    )
+    write_csv(
+        output_dir / f"{YEAR}{MONTH:02d}15_Offers.csv",
+        OFFERS_HEADER,
+        offer_rows(),
     )
     write_csv(output_dir / "NetworkSupplyPointsTable.csv", NSP_HEADER, nsp_rows())
     write_csv(
