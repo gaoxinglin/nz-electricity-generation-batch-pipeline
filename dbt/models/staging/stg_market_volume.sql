@@ -7,7 +7,7 @@
 /*
     Typed reconciled injection/offtake volumes.
 
-    Grain: POC x participant x trading date x trading period x flow
+    Grain: network x POC x participant x trading date x trading period x flow
     direction. FlowDirection is normalised to lowercase so the fact layer
     can pivot Injection/Offtake into measure columns.
 */
@@ -18,6 +18,7 @@ WITH source AS (
 
 SELECT
     {{ dbt_utils.generate_surrogate_key([
+        'network',
         'point_of_connection',
         'participant',
         'trading_date',

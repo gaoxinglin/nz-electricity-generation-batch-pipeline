@@ -92,8 +92,8 @@ models:
 
   - name: stg_market_volume
     description: >
-      Typed reconciled injection/offtake volumes. Source grain is POC x
-      participant x trading period x flow direction.
+      Typed reconciled injection/offtake volumes. Source grain is network x
+      POC x participant x trading period x flow direction.
     columns:
       - name: market_volume_id
         tests:

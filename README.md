@@ -8,11 +8,12 @@
 ![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white)
 ![AWS S3](https://img.shields.io/badge/AWS_S3-Data_Lake-569A31?logo=amazons3&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit&logoColor=white)
+![Power BI](https://img.shields.io/badge/Power_BI-F2C811?logo=powerbi&logoColor=black)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
 A production-style batch ELT platform for New Zealand wholesale electricity market data.
 
-The project ingests public Electricity Authority EMI datasets, lands raw files in local storage or AWS S3, loads raw warehouse tables, transforms them with dbt into a Kimball-style analytics layer, runs reconciliation tests, captures dbt run telemetry, and serves the marts through a Streamlit dashboard.
+The project ingests public Electricity Authority EMI datasets, lands raw files in local storage or AWS S3, loads raw warehouse tables, transforms them with dbt into a Kimball-style analytics layer, runs reconciliation tests, captures dbt run telemetry, and serves the marts through a Streamlit or Power BI dashboard.
 
 The main engineering constraint is portability: the same dbt project runs on DuckDB for local reproduction and Snowflake for cloud operation. That makes the project cheap to review on a laptop while still demonstrating the patterns expected in a cloud data engineering stack.
 
@@ -177,7 +178,7 @@ The cloud path provisions or uses:
 |---|---|
 | AWS S3 bucket | Raw CSV landing zone under `raw/` prefixes |
 | AWS IAM user/policy | Read access for Snowflake external stage |
-| Snowflake database | RAW and ANALYTICS schemas |
+| Snowflake database | RAW, STAGING, and ANALYTICS schemas |
 | Snowflake warehouses | `TRANSFORM_WH` and `DASHBOARD_WH`, XSMALL with auto-suspend |
 | Snowflake stage | `RAW.RAW_STAGE` pointing to the S3 raw prefix |
 | Airflow | Monthly ingestion, S3 upload, Snowflake load, dbt run/test, artifact capture |
@@ -334,7 +335,7 @@ show warehouses like '%WH';
 
 select table_schema, table_name, row_count
 from information_schema.tables
-where table_schema in ('RAW', 'ANALYTICS')
+where table_schema in ('RAW', 'STAGING', 'ANALYTICS')
 order by table_schema, table_name;
 
 select node_type, status, count(*) as executions
@@ -351,7 +352,7 @@ limit 20;
 Also capture:
 
 1. `RAW.RAW_STAGE` definition with the S3 URL partly redacted.
-2. `RAW` and `ANALYTICS` schemas with raw, fact, dimension, and mart tables.
+2. `RAW`, `STAGING`, and `ANALYTICS` schemas with raw, staging, fact, dimension, and mart tables.
 3. Query history showing `COPY INTO`, `dbt run`, and `dbt test` activity.
 4. Warehouse settings for `TRANSFORM_WH` and `DASHBOARD_WH`, especially size and auto-suspend.
 

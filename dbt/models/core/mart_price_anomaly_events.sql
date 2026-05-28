@@ -24,7 +24,9 @@ WITH price AS (
         tp_number,
         price_nzd_mwh,
         pricing_regime,
-        is_proxy
+        is_proxy,
+        {{ dbt.dateadd('minute', '(tp_number - 1) * 30', 'CAST(trading_date AS TIMESTAMP)') }}
+            AS trading_period_start_ts
     FROM {{ ref('fct_price') }}
 ),
 
@@ -33,13 +35,13 @@ with_context AS (
         p.*,
         AVG(price_nzd_mwh) OVER (
             PARTITION BY poc_code
-            ORDER BY trading_date, tp_number
-            ROWS BETWEEN 1440 PRECEDING AND 1 PRECEDING
+            ORDER BY trading_period_start_ts
+            RANGE BETWEEN INTERVAL '30 DAYS' PRECEDING AND INTERVAL '1 SECOND' PRECEDING
         ) AS rolling_30d_avg_price,
         STDDEV_SAMP(price_nzd_mwh) OVER (
             PARTITION BY poc_code
-            ORDER BY trading_date, tp_number
-            ROWS BETWEEN 1440 PRECEDING AND 1 PRECEDING
+            ORDER BY trading_period_start_ts
+            RANGE BETWEEN INTERVAL '30 DAYS' PRECEDING AND INTERVAL '1 SECOND' PRECEDING
         ) AS rolling_30d_stddev_price
     FROM price AS p
 ),

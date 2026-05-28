@@ -40,13 +40,13 @@ def _analytics() -> str:
     """Fully-qualified analytics schema for the current mode."""
     if _mode() == "local":
         return "main_analytics"
-    return "RAW_ANALYTICS"  # Snowflake: target.schema='RAW' + +schema='analytics'
+    return "ANALYTICS"
 
 
 def _staging() -> str:
     if _mode() == "local":
-        return "main_raw"
-    return "RAW_RAW"
+        return "main_staging"
+    return "STAGING"
 
 
 # ─── connection plumbing ──────────────────────────────────────────────
@@ -119,7 +119,7 @@ def _snowflake_conn():
         database=s["database"],
         warehouse=s["warehouse"],
         role=s["role"],
-        schema="RAW_ANALYTICS",
+        schema="ANALYTICS",
     )
     try:
         yield conn

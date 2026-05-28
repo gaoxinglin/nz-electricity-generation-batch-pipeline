@@ -27,6 +27,11 @@ resource "snowflake_schema" "raw" {
   name     = "RAW"
 }
 
+resource "snowflake_schema" "staging" {
+  database = snowflake_database.this.name
+  name     = "STAGING"
+}
+
 resource "snowflake_schema" "analytics" {
   database = snowflake_database.this.name
   name     = "ANALYTICS"
@@ -578,6 +583,14 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_schema" {
   }
 }
 
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_schema" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
+  on_schema {
+    schema_name = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
+  }
+}
+
 resource "snowflake_grant_privileges_to_account_role" "transformer_analytics_schema" {
   account_role_name = snowflake_account_role.transformer.name
   privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
@@ -593,6 +606,17 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_tables" {
     all {
       object_type_plural = "TABLES"
       in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.raw.name}\""
+    }
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_tables" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]
+  on_schema_object {
+    all {
+      object_type_plural = "TABLES"
+      in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
     }
   }
 }
@@ -615,6 +639,17 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_future_ta
     future {
       object_type_plural = "TABLES"
       in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.raw.name}\""
+    }
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_future_tables" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]
+  on_schema_object {
+    future {
+      object_type_plural = "TABLES"
+      in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
     }
   }
 }

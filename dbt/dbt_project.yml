@@ -28,7 +28,7 @@ clean-targets:
 models:
   nz_electricity:
     staging:
-      +schema: raw
+      +schema: staging
       +materialized: table
     intermediate:
       +schema: analytics

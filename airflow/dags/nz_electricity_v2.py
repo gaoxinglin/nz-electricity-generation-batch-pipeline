@@ -571,7 +571,10 @@ def hydro_load(**kwargs) -> None:
                 FORCE = TRUE
             """
             cur.execute(copy_sql)
-            total += cur.fetchone()[0]
+            row = cur.fetchone()
+            columns = [col[0].lower() for col in cur.description]
+            rows_loaded_idx = columns.index("rows_loaded")
+            total += int(row[rows_loaded_idx] or 0)
         cur.execute("COMMIT")
         logger.info("hydro loaded — %d rows across %d files", total, len(keys))
     except Exception:
