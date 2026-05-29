@@ -1,5 +1,5 @@
 .PHONY: demo local-full local-subset market-subset offer-sample dbt-test terraform-init terraform-plan terraform-apply \
-        cloud-up cloud-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
+        cloud-up cloud-backfill cloud-offers-s3-backfill cloud-volume-s3-backfill cloud-dbt-full cloud-dashboard build up down restart logs \
         backfill dbt-full
 
 # ==================== 面试演示 ====================
@@ -102,6 +102,42 @@ cloud-backfill:          ## 首次历史回填：按月触发 ingestion-only V2 
 	      done; \
 	    done; \
 	    echo "Queued V2 ingestion-only runs through $$end_ym. After they finish, run: make cloud-dbt-full"'
+
+cloud-offers-s3-backfill: ## Offers 全量 S3-only 回填：按月触发 2016-01 至昨日所在月份
+	docker compose exec airflow-scheduler bash -c '\
+	    end_ym=$$(date -d "yesterday" +%Y%m); \
+	    suffix=$$(date -u +%Y%m%d%H%M%S); \
+	    triggered=0; \
+	    for year in $$(seq 2016 "$${end_ym:0:4}"); do \
+	      for month in $$(seq -w 1 12); do \
+	        ym="$$year$$month"; \
+	        if [[ "$$ym" -le "$$end_ym" ]]; then \
+	          airflow dags trigger nz_offers_s3_backfill \
+	            --run-id "offers_s3_$${ym}_$${suffix}" \
+	            --conf "{\"year_month\":\"$$ym\"}" >/dev/null; \
+	          triggered=$$((triggered + 1)); \
+	        fi; \
+	      done; \
+	    done; \
+	    echo "Queued $$triggered monthly Offers S3-only backfill runs through $$end_ym"'
+
+cloud-volume-s3-backfill: ## Reconciled volumes 全量 S3-only 回填：按月触发 2016-01 至上月
+	docker compose exec airflow-scheduler bash -c '\
+	    end_ym=$$(date -d "$$(date +%Y-%m-01) -1 day" +%Y%m); \
+	    suffix=$$(date -u +%Y%m%d%H%M%S); \
+	    triggered=0; \
+	    for year in $$(seq 2016 "$${end_ym:0:4}"); do \
+	      for month in $$(seq -w 1 12); do \
+	        ym="$$year$$month"; \
+	        if [[ "$$ym" -le "$$end_ym" ]]; then \
+	          airflow dags trigger nz_volume_s3_backfill \
+	            --run-id "volume_s3_$${ym}_$${suffix}" \
+	            --conf "{\"year_month\":\"$$ym\"}" >/dev/null; \
+	          triggered=$$((triggered + 1)); \
+	        fi; \
+	      done; \
+	    done; \
+	    echo "Queued $$triggered monthly reconciled volume S3-only backfill runs through $$end_ym"'
 
 cloud-dbt-full:          ## Snowflake 全量刷新（首次回填后调用一次）
 	bash -lc 'set -a; source .env; set +a; \
