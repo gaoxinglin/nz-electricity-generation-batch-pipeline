@@ -309,3 +309,44 @@ s3://nz-electricity-generation/raw/offers/
 objects: 3,801
 bytes: 177,773,392,097
 ```
+
+## Reconciled Volumes Snowflake RAW Backfill
+
+- DAG: `nz_volume_snowflake_backfill`
+- Purpose: load existing S3 reconciled volume gzip files into `RAW.RAW_MARKET_VOLUME`; no dbt run.
+- Probe: `volume_sf_202401_probe2_20260529`
+- Full run suffix: `20260529112126`
+- Result: all Airflow runs succeeded.
+
+Airflow DAG run summary:
+
+```text
+nz_volume_snowflake_backfill success: 125
+```
+
+Snowflake RAW validation:
+
+```text
+table: RAW.RAW_MARKET_VOLUME
+loaded_months: 124
+min_month: 201601
+max_month: 202604
+raw_rows: 646,903,307
+min_date: 2016-01-01
+max_date: 2026-04-30
+```
+
+Sample month row counts:
+
+```text
+201601  3,920,696
+202401  5,899,262
+202604  5,759,040
+```
+
+Operational note:
+
+```text
+ALTER WAREHOUSE TRANSFORM_WH SUSPEND failed for TRANSFORMER_SVC:
+Insufficient privileges to operate on warehouse 'TRANSFORM_WH'.
+```
