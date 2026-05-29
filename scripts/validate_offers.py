@@ -115,12 +115,14 @@ def validate_file(csv_path: Path) -> int:
                 raise SchemaValidationError(f"{csv_path.name} row {row_count}: empty ParticipantCode")
             if not poc:
                 raise SchemaValidationError(f"{csv_path.name} row {row_count}: empty PointOfConnection")
-            if not unit:
-                raise SchemaValidationError(f"{csv_path.name} row {row_count}: empty Unit")
             if not product_type:
                 raise SchemaValidationError(f"{csv_path.name} row {row_count}: empty ProductType")
             if not product_class:
                 raise SchemaValidationError(f"{csv_path.name} row {row_count}: empty ProductClass")
+            if product_type == "Energy" and product_class == "Injection" and not unit:
+                raise SchemaValidationError(
+                    f"{csv_path.name} row {row_count}: empty Unit for Energy/Injection offer"
+                )
             if not _is_iso_date(utc_submission_date):
                 raise SchemaValidationError(
                     f"{csv_path.name} row {row_count}: bad UTCSubmissionDate {utc_submission_date!r}"
