@@ -8,11 +8,12 @@
 ![Terraform](https://img.shields.io/badge/Terraform-IaC-7B42BC?logo=terraform&logoColor=white)
 ![AWS S3](https://img.shields.io/badge/AWS_S3-Data_Lake-569A31?logo=amazons3&logoColor=white)
 ![Streamlit](https://img.shields.io/badge/Streamlit-Dashboard-FF4B4B?logo=streamlit&logoColor=white)
+![Power BI](https://img.shields.io/badge/Power_BI-F2C811?logo=powerbi&logoColor=black)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 
 A production-style batch ELT platform for New Zealand wholesale electricity market data.
 
-The project ingests public Electricity Authority EMI datasets, lands raw files in local storage or AWS S3, loads raw warehouse tables, transforms them with dbt into a Kimball-style analytics layer, runs reconciliation tests, captures dbt run telemetry, and serves the marts through a Streamlit dashboard.
+The project ingests public Electricity Authority EMI datasets, lands raw files in local storage or AWS S3, loads raw warehouse tables, transforms them with dbt into a Kimball-style analytics layer, runs reconciliation tests, captures dbt run telemetry, and serves the marts through a Streamlit or Power BI dashboard.
 
 The main engineering constraint is portability: the same dbt project runs on DuckDB for local reproduction and Snowflake for cloud operation. That makes the project cheap to review on a laptop while still demonstrating the patterns expected in a cloud data engineering stack.
 
@@ -22,7 +23,7 @@ This repository is designed to be evaluated as a data engineering project, not o
 
 | Capability | Implementation |
 |---|---|
-| Batch ingestion | Python extract and validation scripts for generation, price, NSP, and hydro storage datasets |
+| Batch ingestion | Python extract and validation scripts for generation, price, reconciled volume, Offers, NSP, and hydro storage datasets |
 | Orchestration | Airflow DAG with parallel source branches, retry policy, pools, S3 landing, Snowflake loads, dbt run/test, and artifact ingestion |
 | Warehouse modeling | dbt staging, intermediate, dimension, fact, and mart models |
 | Cross-warehouse support | DuckDB local target and Snowflake production target using the same dbt codebase |
@@ -35,7 +36,7 @@ This repository is designed to be evaluated as a data engineering project, not o
 
 ```mermaid
 flowchart LR
-    EMI["Electricity Authority EMI<br/>Generation_MD, FinalEnergyPrices, NSP, Hydro"]
+    EMI["Electricity Authority EMI<br/>Generation_MD, FinalEnergyPrices, Volumes, Offers, NSP, Hydro"]
 
     subgraph LOCAL["Local development"]
         L_EXTRACT["Python download scripts"]
@@ -78,6 +79,8 @@ flowchart LR
 |---|---:|---|
 | Generation_MD | Generator x trading date x trading period | Fuel mix, plant ranking, renewable share, generation facts |
 | FinalEnergyPrices | POC x trading date x trading period | Price facts, price spikes, island spread, renewable-price analysis |
+| Reconciled injection/offtake volumes | POC x participant x trading date x trading period x flow direction | Demand/injection context for price anomaly and spike-feature analysis |
+| Daily Offers | POC x participant x unit x trading date x trading period x tranche | Offer-stack and supply-curve context for price spike features |
 | Network Supply Points | POC / node reference | Region and island enrichment for price and generation analysis |
 | Hydro storage | Site x date | Hydro storage trend and hydro-price driver mart |
 
@@ -145,6 +148,8 @@ For larger local validation:
 
 ```bash
 make local-subset    # approximately one year of data
+make market-subset   # one month with reconciled volume market analytics
+make offer-sample    # adds one latest daily Offers file; this file can be large
 make local-full      # full available history
 make dbt-test        # dbt tests on DuckDB
 ```
@@ -173,10 +178,16 @@ The cloud path provisions or uses:
 |---|---|
 | AWS S3 bucket | Raw CSV landing zone under `raw/` prefixes |
 | AWS IAM user/policy | Read access for Snowflake external stage |
-| Snowflake database | RAW and ANALYTICS schemas |
+| Snowflake database | RAW, STAGING, and ANALYTICS schemas |
 | Snowflake warehouses | `TRANSFORM_WH` and `DASHBOARD_WH`, XSMALL with auto-suspend |
 | Snowflake stage | `RAW.RAW_STAGE` pointing to the S3 raw prefix |
 | Airflow | Monthly ingestion, S3 upload, Snowflake load, dbt run/test, artifact capture |
+
+The current cloud evidence includes completed S3 and Snowflake backfills for
+reconciled market volumes, plus completed Offers S3 landing runs for later
+market-depth work.
+
+![Airflow DAG list showing completed volume and Offers backfills](docs/screenshots/airflow-dag-list-full-backfill-complete.jpg)
 
 Host-side dbt and Streamlit commands may need the local private key path instead of the container path:
 
@@ -191,6 +202,8 @@ SNOWFLAKE_PRIVATE_KEY_PATH=~/.ssh/snowflake_rsa_key.p8 \
 RAW
   raw_generation
   raw_price
+  raw_market_volume
+  raw_offers
   raw_nsp
   raw_hydro_storage
   raw_dbt_run
@@ -198,6 +211,8 @@ RAW
 STAGING
   stg_generation
   stg_price
+  stg_market_volume
+  stg_energy_offer
   stg_nsp
   stg_hydro_storage
   stg_dbt_run
@@ -216,6 +231,8 @@ CORE ANALYTICS
   dim_catchment
   fct_generation
   fct_price
+  fct_market_volume
+  fct_offer_stack
   fct_hydro
   fct_dbt_run
   mart_generation_daily
@@ -225,6 +242,10 @@ CORE ANALYTICS
   mart_seasonal_pattern
   mart_price_daily
   mart_price_spike_events
+  mart_price_anomaly_events
+  mart_price_spike_features
+  mart_offer_curve
+  mart_price_offer_context
   mart_renewable_price_impact
   mart_hydro_price_driver
   mart_warehouse_cost              # Snowflake only; depends on ACCOUNT_USAGE
@@ -236,8 +257,13 @@ The analytical marts answer these business questions:
 |---|---|
 | Generation | Daily and monthly generation by fuel, plant ranking, renewable share, seasonal behavior |
 | Wholesale price | Daily POC price, price spikes, negative prices, regional and island spread |
+| Market analytics | Reconciled offtake/injection plus offer-curve context for price anomalies and price-spike features |
 | Cross-source analysis | Renewable share versus price, hydro storage versus price |
 | Operations | dbt model/test success rate, freshness, Snowflake warehouse usage |
+
+Snowflake object evidence for the market-volume path:
+
+![Snowflake market volume layer row counts and table sizes](docs/screenshots/snowflake-market-volume-layer-table-sizes.jpg)
 
 ## Data Quality and Reconciliation
 
@@ -259,6 +285,14 @@ uv run python scripts/mini_poc_fixture.py
 ```
 
 `scripts/mini_poc_fixture.py` is the strongest cross-warehouse check: it materializes a small fixture on DuckDB and Snowflake and compares the output row by row.
+
+Recent reconciled-volume validation in Snowflake:
+
+![Snowflake raw market volume coverage query result](docs/screenshots/snowflake-raw-market-volume-coverage-query.jpg)
+
+![Snowflake price to volume coverage result](docs/screenshots/snowflake-price-volume-coverage-overall.jpg)
+
+![Snowflake monthly price to volume coverage result](docs/screenshots/snowflake-price-volume-coverage-by-month.jpg)
 
 ## Observability
 
@@ -290,7 +324,15 @@ make cloud-dashboard
 
 The Streamlit dashboard is intentionally thin: it queries the mart layer and avoids embedding transformation logic in the UI. That keeps dbt as the source of truth and allows another BI tool, such as Power BI, to consume the same tables.
 
-Current dashboard screenshots are stored in `docs/screenshots/`.
+Cloud-mode Streamlit examples:
+
+![Streamlit executive overview in Snowflake cloud mode](docs/screenshots/streamlit-executive-overview-cloud.jpg)
+
+![Streamlit wholesale price overview in Snowflake cloud mode](docs/screenshots/streamlit-price-overview-cloud.jpg)
+
+![Streamlit fuel mix trend in Snowflake cloud mode](docs/screenshots/streamlit-fuel-mix-trend-cloud.jpg)
+
+Current dashboard and evidence screenshots are stored in `docs/screenshots/`.
 
 ## Evidence Pack for Interviews
 
@@ -319,7 +361,7 @@ show warehouses like '%WH';
 
 select table_schema, table_name, row_count
 from information_schema.tables
-where table_schema in ('RAW', 'ANALYTICS')
+where table_schema in ('RAW', 'STAGING', 'ANALYTICS')
 order by table_schema, table_name;
 
 select node_type, status, count(*) as executions
@@ -336,7 +378,7 @@ limit 20;
 Also capture:
 
 1. `RAW.RAW_STAGE` definition with the S3 URL partly redacted.
-2. `RAW` and `ANALYTICS` schemas with raw, fact, dimension, and mart tables.
+2. `RAW`, `STAGING`, and `ANALYTICS` schemas with raw, staging, fact, dimension, and mart tables.
 3. Query history showing `COPY INTO`, `dbt run`, and `dbt test` activity.
 4. Warehouse settings for `TRANSFORM_WH` and `DASHBOARD_WH`, especially size and auto-suspend.
 

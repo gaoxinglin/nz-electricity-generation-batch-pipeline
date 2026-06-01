@@ -8,6 +8,8 @@ partial run never leaves the warehouse half-loaded.
 Currently handles:
   - {YYYYMM}_Generation_MD.csv      → raw.raw_generation
   - {YYYYMM}_FinalEnergyPrices.csv  → raw.raw_price
+  - {YYYYMM}_ReconciledInjectionAndOfftake.csv[.gz] → raw.raw_market_volume
+  - {YYYYMMDD}_Offers.csv           → raw.raw_offers
   - NetworkSupplyPointsTable.csv    → raw.raw_nsp (full reload — small file)
 
 Schema parity with Snowflake (V1):
@@ -36,6 +38,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 GENERATION_FILENAME_RE = re.compile(r"^(\d{6})_Generation_MD\.csv$")
 PRICE_FILENAME_RE = re.compile(r"^(\d{6})_FinalEnergyPrices\.csv$")
+MARKET_VOLUME_FILENAME_RE = re.compile(r"^(\d{6})_ReconciledInjectionAndOfftake\.csv(?:\.gz)?$")
+OFFERS_FILENAME_RE = re.compile(r"^(\d{8})_Offers\.csv$")
 NSP_FILENAME = "NetworkSupplyPointsTable.csv"
 HYDRO_STORAGE_SUBDIR = "hydro"
 # Filename pattern: {IslandCode}_{SiteCode}_Storage_{LakeName}.csv
@@ -58,6 +62,43 @@ HYDRO_COLUMN_MAP = {
 PRICE_RAW_COLUMNS = [
     "trading_date", "trading_period", "point_of_connection", "dollars_per_mwh",
 ]
+
+MARKET_VOLUME_SOURCE_COLUMNS = {
+    "PointOfConnection": "point_of_connection",
+    "Network": "network",
+    "Island": "island",
+    "Participant": "participant",
+    "TradingDate": "trading_date",
+    "TradingPeriod": "trading_period",
+    "TradingPeriodStartTime": "trading_period_start_time",
+    "FlowDirection": "flow_direction",
+    "KilowattHours": "kilowatt_hours",
+}
+MARKET_VOLUME_RAW_COLUMNS = list(MARKET_VOLUME_SOURCE_COLUMNS.values())
+
+OFFERS_SOURCE_COLUMNS = {
+    "TradingDate": "trading_date",
+    "TradingPeriod": "trading_period",
+    "ParticipantCode": "participant_code",
+    "PointOfConnection": "point_of_connection",
+    "Unit": "unit",
+    "ProductType": "product_type",
+    "ProductClass": "product_class",
+    "ReserveType": "reserve_type",
+    "ProductDescription": "product_description",
+    "UTCSubmissionDate": "utc_submission_date",
+    "UTCSubmissionTime": "utc_submission_time",
+    "SubmissionOrder": "submission_order",
+    "IsLatestYesNo": "is_latest_yes_no",
+    "Tranche": "tranche",
+    "MaximumRampUpMegawattsPerHour": "maximum_ramp_up_mw_per_hour",
+    "MaximumRampDownMegawattsPerHour": "maximum_ramp_down_mw_per_hour",
+    "PartiallyLoadedSpinningReservePercent": "partially_loaded_spinning_reserve_percent",
+    "MaximumOutputMegawatts": "maximum_output_mw",
+    "ForecastOfGenerationPotentialMegawatts": "forecast_generation_potential_mw",
+    "Megawatts": "megawatts",
+    "DollarsPerMegawattHour": "dollars_per_mwh",
+}
 
 # EMI Generation_MD column order (verified from the file header — index 4 is
 # Fuel_Code, index 6 is Trading_date, indices 7-56 are TP1-TP50).
@@ -270,6 +311,214 @@ def load_all_price(db_path: Path, source_dir: Path) -> None:
         conn.close()
 
 
+def ensure_raw_market_volume(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS raw.raw_market_volume (
+            point_of_connection       VARCHAR,
+            network                   VARCHAR,
+            island                    VARCHAR,
+            participant               VARCHAR,
+            trading_date              VARCHAR,
+            trading_period            VARCHAR,
+            trading_period_start_time VARCHAR,
+            flow_direction            VARCHAR,
+            kilowatt_hours            VARCHAR,
+            trading_month             VARCHAR,
+            _source_file_modified_at  TIMESTAMP
+        )
+        """
+    )
+
+
+def load_market_volume_file(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    trading_month: str,
+) -> int:
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
+    select_cols = ",\n                ".join(
+        f'"{source}" AS {target}'
+        for source, target in MARKET_VOLUME_SOURCE_COLUMNS.items()
+    )
+    source_columns = ", ".join(
+        f"'{source}': 'VARCHAR'" for source in MARKET_VOLUME_SOURCE_COLUMNS
+    )
+
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(
+            "DELETE FROM raw.raw_market_volume WHERE trading_month = ?",
+            [trading_month],
+        )
+        conn.execute(
+            f"""
+            INSERT INTO raw.raw_market_volume
+            SELECT
+                {select_cols},
+                ? AS trading_month,
+                ? AS _source_file_modified_at
+            FROM read_csv(
+                ?,
+                header=true,
+                all_varchar=true,
+                columns={{
+                    {source_columns}
+                }}
+            )
+            """,
+            [trading_month, file_mtime, str(csv_path)],
+        )
+        row_count = conn.execute(
+            "SELECT count(*) FROM raw.raw_market_volume WHERE trading_month = ?",
+            [trading_month],
+        ).fetchone()[0]
+        conn.execute("COMMIT")
+        return row_count
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def load_all_market_volume(db_path: Path, source_dir: Path) -> None:
+    files = sorted(
+        f for f in source_dir.iterdir()
+        if MARKET_VOLUME_FILENAME_RE.match(f.name)
+    )
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    try:
+        ensure_raw_market_volume(conn)
+        if not files:
+            logger.warning("no ReconciledInjectionAndOfftake files found under %s — raw table left empty", source_dir)
+            return
+
+        total = 0
+        for f in files:
+            match = MARKET_VOLUME_FILENAME_RE.match(f.name)
+            assert match is not None
+            ym = match.group(1)
+            rows = load_market_volume_file(conn, f, ym)
+            logger.info("loaded %s — %d rows", f.name, rows)
+            total += rows
+        logger.info("done — %d files, %d total rows in raw.raw_market_volume", len(files), total)
+    finally:
+        conn.close()
+
+
+def ensure_raw_offers(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS raw.raw_offers (
+            trading_date                                  VARCHAR,
+            trading_period                                VARCHAR,
+            participant_code                              VARCHAR,
+            point_of_connection                           VARCHAR,
+            unit                                          VARCHAR,
+            product_type                                  VARCHAR,
+            product_class                                 VARCHAR,
+            reserve_type                                  VARCHAR,
+            product_description                           VARCHAR,
+            utc_submission_date                           VARCHAR,
+            utc_submission_time                           VARCHAR,
+            submission_order                              VARCHAR,
+            is_latest_yes_no                              VARCHAR,
+            tranche                                       VARCHAR,
+            maximum_ramp_up_mw_per_hour                   VARCHAR,
+            maximum_ramp_down_mw_per_hour                 VARCHAR,
+            partially_loaded_spinning_reserve_percent     VARCHAR,
+            maximum_output_mw                             VARCHAR,
+            forecast_generation_potential_mw              VARCHAR,
+            megawatts                                     VARCHAR,
+            dollars_per_mwh                               VARCHAR,
+            trading_month                                 VARCHAR,
+            _source_file_modified_at                      TIMESTAMP
+        )
+        """
+    )
+
+
+def load_offers_file(
+    conn: duckdb.DuckDBPyConnection,
+    csv_path: Path,
+    trading_day: str,
+) -> int:
+    file_mtime = datetime.fromtimestamp(csv_path.stat().st_mtime, tz=UTC)
+    trading_date = f"{trading_day[:4]}-{trading_day[4:6]}-{trading_day[6:]}"
+    trading_month = trading_day[:6]
+    select_cols = ",\n                ".join(
+        f'"{source}" AS {target}'
+        for source, target in OFFERS_SOURCE_COLUMNS.items()
+    )
+    source_columns = ", ".join(
+        f"'{source}': 'VARCHAR'" for source in OFFERS_SOURCE_COLUMNS
+    )
+
+    conn.execute("BEGIN TRANSACTION")
+    try:
+        conn.execute(
+            "DELETE FROM raw.raw_offers WHERE trading_date = ?",
+            [trading_date],
+        )
+        conn.execute(
+            f"""
+            INSERT INTO raw.raw_offers
+            SELECT
+                {select_cols},
+                ? AS trading_month,
+                ? AS _source_file_modified_at
+            FROM read_csv(
+                ?,
+                header=true,
+                all_varchar=true,
+                columns={{
+                    {source_columns}
+                }}
+            )
+            """,
+            [trading_month, file_mtime, str(csv_path)],
+        )
+        row_count = conn.execute(
+            "SELECT count(*) FROM raw.raw_offers WHERE trading_date = ?",
+            [trading_date],
+        ).fetchone()[0]
+        conn.execute("COMMIT")
+        return row_count
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def load_all_offers(db_path: Path, source_dir: Path) -> None:
+    files = sorted(
+        f for f in source_dir.iterdir()
+        if OFFERS_FILENAME_RE.match(f.name)
+    )
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = duckdb.connect(str(db_path))
+    try:
+        ensure_raw_offers(conn)
+        if not files:
+            logger.warning("no Offers files found under %s — raw table left empty", source_dir)
+            return
+
+        total = 0
+        for f in files:
+            match = OFFERS_FILENAME_RE.match(f.name)
+            assert match is not None
+            trading_day = match.group(1)
+            rows = load_offers_file(conn, f, trading_day)
+            logger.info("loaded %s — %d rows", f.name, rows)
+            total += rows
+        logger.info("done — %d files, %d total rows in raw.raw_offers", len(files), total)
+    finally:
+        conn.close()
+
+
 def ensure_raw_hydro_storage(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("CREATE SCHEMA IF NOT EXISTS raw")
     conn.execute(
@@ -375,6 +624,8 @@ def main(argv: list[str] | None = None) -> int:
 
     load_all_generation(Path(args.db), Path(args.source))
     load_all_price(Path(args.db), Path(args.source))
+    load_all_market_volume(Path(args.db), Path(args.source))
+    load_all_offers(Path(args.db), Path(args.source))
     load_nsp(Path(args.db), Path(args.source))
     load_hydro(Path(args.db), Path(args.source))
     return 0

@@ -27,6 +27,11 @@ resource "snowflake_schema" "raw" {
   name     = "RAW"
 }
 
+resource "snowflake_schema" "staging" {
+  database = snowflake_database.this.name
+  name     = "STAGING"
+}
+
 resource "snowflake_schema" "analytics" {
   database = snowflake_database.this.name
   name     = "ANALYTICS"
@@ -370,6 +375,98 @@ resource "snowflake_table" "raw_price" {
 }
 
 # ──────────────────────────────────────────────
+# Table: raw_market_volume (11 columns) — market expansion
+# 9 source columns (all VARCHAR) + trading_month
+# + _source_file_modified_at.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_market_volume" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_MARKET_VOLUME"
+
+  column {
+    name = "POINT_OF_CONNECTION"
+    type = "VARCHAR"
+  }
+  column {
+    name = "NETWORK"
+    type = "VARCHAR"
+  }
+  column {
+    name = "ISLAND"
+    type = "VARCHAR"
+  }
+  column {
+    name = "PARTICIPANT"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_DATE"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_PERIOD"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_PERIOD_START_TIME"
+    type = "VARCHAR"
+  }
+  column {
+    name = "FLOW_DIRECTION"
+    type = "VARCHAR"
+  }
+  column {
+    name = "KILOWATT_HOURS"
+    type = "VARCHAR"
+  }
+  column {
+    name = "TRADING_MONTH"
+    type = "VARCHAR"
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
+# Table: raw_offers (23 columns) — market expansion
+# 21 source columns (all VARCHAR) + trading_month
+# + _source_file_modified_at. Daily files are large, so ingestion is
+# normally opt-in and date-scoped.
+# ──────────────────────────────────────────────
+
+resource "snowflake_table" "raw_offers" {
+  database = snowflake_database.this.name
+  schema   = snowflake_schema.raw.name
+  name     = "RAW_OFFERS"
+
+  dynamic "column" {
+    for_each = [
+      "TRADING_DATE", "TRADING_PERIOD", "PARTICIPANT_CODE",
+      "POINT_OF_CONNECTION", "UNIT", "PRODUCT_TYPE", "PRODUCT_CLASS",
+      "RESERVE_TYPE", "PRODUCT_DESCRIPTION", "UTC_SUBMISSION_DATE",
+      "UTC_SUBMISSION_TIME", "SUBMISSION_ORDER", "IS_LATEST_YES_NO",
+      "TRANCHE", "MAXIMUM_RAMP_UP_MW_PER_HOUR",
+      "MAXIMUM_RAMP_DOWN_MW_PER_HOUR",
+      "PARTIALLY_LOADED_SPINNING_RESERVE_PERCENT", "MAXIMUM_OUTPUT_MW",
+      "FORECAST_GENERATION_POTENTIAL_MW", "MEGAWATTS", "DOLLARS_PER_MWH",
+      "TRADING_MONTH",
+    ]
+    content {
+      name = column.value
+      type = "VARCHAR"
+    }
+  }
+  column {
+    name = "_SOURCE_FILE_MODIFIED_AT"
+    type = "TIMESTAMP_NTZ"
+  }
+}
+
+# ──────────────────────────────────────────────
 # Table: raw_nsp (28 columns) — Phase 2
 # The 27 published columns are kept as VARCHAR; stg_nsp does the cast +
 # Current-flag filter. + _source_file_modified_at.
@@ -486,6 +583,14 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_schema" {
   }
 }
 
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_schema" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
+  on_schema {
+    schema_name = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
+  }
+}
+
 resource "snowflake_grant_privileges_to_account_role" "transformer_analytics_schema" {
   account_role_name = snowflake_account_role.transformer.name
   privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
@@ -501,6 +606,17 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_tables" {
     all {
       object_type_plural = "TABLES"
       in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.raw.name}\""
+    }
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_tables" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]
+  on_schema_object {
+    all {
+      object_type_plural = "TABLES"
+      in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
     }
   }
 }
@@ -523,6 +639,17 @@ resource "snowflake_grant_privileges_to_account_role" "transformer_raw_future_ta
     future {
       object_type_plural = "TABLES"
       in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.raw.name}\""
+    }
+  }
+}
+
+resource "snowflake_grant_privileges_to_account_role" "transformer_staging_future_tables" {
+  account_role_name = snowflake_account_role.transformer.name
+  privileges        = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE"]
+  on_schema_object {
+    future {
+      object_type_plural = "TABLES"
+      in_schema          = "\"${snowflake_database.this.name}\".\"${snowflake_schema.staging.name}\""
     }
   }
 }

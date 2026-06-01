@@ -6,7 +6,7 @@ nz_electricity:
       type: duckdb
       path: "{{ env_var('NZEG_DUCKDB_PATH', '../data/nzeg.duckdb') }}"
       threads: 4
-      # All models materialize under schemas raw/analytics inside the
+      # Models materialize under raw/staging/analytics schemas inside the
       # single .duckdb file. The file is gitignored under data/.
 
     # ── Cloud production: Snowflake (key-pair auth) ──────────────────

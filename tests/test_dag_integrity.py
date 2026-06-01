@@ -81,6 +81,10 @@ def test_v2_dag_task_set(dag_v2):
         "generation_upload", "generation_load",
         # price branch
         "price_download", "price_validate", "price_upload", "price_load",
+        # reconciled market volume branch
+        "volume_download", "volume_validate", "volume_upload", "volume_load",
+        # offers branch (opt-in; daily files are large)
+        "offers_enabled", "offers_download", "offers_validate", "offers_upload", "offers_load",
         # nsp branch
         "nsp_download", "nsp_upload", "nsp_load",
         # hydro branch (V3)
@@ -97,10 +101,12 @@ def test_v2_dag_task_set(dag_v2):
 
 
 def test_v2_branch_join(dag_v2):
-    """All four ingest branches must converge on check_run_dbt."""
+    """All ingest branches must converge on check_run_dbt."""
     check = dag_v2.get_task("check_run_dbt")
     upstream_ids = {t.task_id for t in check.upstream_list}
-    assert upstream_ids == {"generation_load", "price_load", "nsp_load", "hydro_load"}, (
+    assert upstream_ids == {
+        "generation_load", "price_load", "volume_load", "offers_load", "nsp_load", "hydro_load",
+    }, (
         f"check_run_dbt upstream mismatch: {upstream_ids}"
     )
 

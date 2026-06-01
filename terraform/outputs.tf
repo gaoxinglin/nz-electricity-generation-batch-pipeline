@@ -38,6 +38,11 @@ output "snowflake_raw_schema" {
   value       = snowflake_schema.raw.name
 }
 
+output "snowflake_staging_schema" {
+  description = "Snowflake staging schema name"
+  value       = snowflake_schema.staging.name
+}
+
 output "snowflake_analytics_schema" {
   description = "Snowflake analytics schema name"
   value       = snowflake_schema.analytics.name
