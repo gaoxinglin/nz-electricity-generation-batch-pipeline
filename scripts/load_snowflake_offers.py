@@ -110,7 +110,14 @@ def load_offer_day(trading_day: date, s3_key: str) -> int:
             FORCE = TRUE
         """
         cur.execute(copy_sql)
-        loaded = cur.fetchone()[0]
+        copy_result = cur.fetchone()
+        copy_columns = [column[0].lower() for column in cur.description or []]
+        if "rows_loaded" in copy_columns:
+            loaded = int(copy_result[copy_columns.index("rows_loaded")])
+        elif len(copy_result) > 3:
+            loaded = int(copy_result[3])
+        else:
+            loaded = int(copy_result[0])
         cur.execute("COMMIT")
         logger.info("loaded %s rows for trading_date=%s", loaded, trading_date)
         return loaded

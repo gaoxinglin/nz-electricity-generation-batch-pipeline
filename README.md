@@ -265,8 +265,6 @@ Snowflake object evidence for the market-volume path:
 
 ![Snowflake market volume layer row counts and table sizes](docs/screenshots/snowflake-market-volume-layer-table-sizes.jpg)
 
-![Snowflake analytics schema with fct_market_volume and market marts](docs/screenshots/snowflake-analytics-schema-tree.jpg)
-
 ## Data Quality and Reconciliation
 
 The project uses dbt tests as deployment gates.
