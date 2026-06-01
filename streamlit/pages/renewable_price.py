@@ -1,117 +1,127 @@
-"""Renewable vs Price — does a greener mix actually mean cheaper power?"""
+"""Relationship between renewable generation share and wholesale price."""
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import plotly.express as px
 from charts import apply_layout
 from loader import load_renewable_price_impact
+from ui import date_range_filter, fmt_int, fmt_pct, fmt_price, insight_box, multiselect_all, page_header
 
 import streamlit as st
 
-st.title("🌱 Renewable share vs wholesale price")
-st.caption(
-    "Per (POC × date × TP): renewable share of co-located generation paired "
-    "with the wholesale price. From `mart_renewable_price_impact`."
+page_header(
+    "Renewables and Price",
+    "Do higher local renewable shares line up with lower wholesale prices?",
+    "This is an exploratory relationship. Prices also depend on demand, constraints, offers, and node location.",
 )
 
-df = load_renewable_price_impact()
-if df.empty:
-    st.info("No data — load price + generation marts first.")
+try:
+    df = load_renewable_price_impact()
+except Exception:
+    st.error("Could not load the renewable-price summary for this environment.")
     st.stop()
 
+if df.empty:
+    st.info("No renewable-price data is available. Load both generation and price data, then run the transformation job.")
+    st.stop()
 
-# ─── filters ────────────────────────────────────────────────────
-c1, c2 = st.columns([2, 3])
-with c1:
-    islands_available = sorted(df["island"].dropna().unique().tolist())
-    pick_islands = st.multiselect(
-        "Island", islands_available, default=islands_available
-    )
-with c2:
-    d0, d1 = df["trading_date"].min(), df["trading_date"].max()
-    date_range = st.date_input(
-        "Date range", value=(d0, d1), min_value=d0, max_value=d1
-    )
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        d0, d1 = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+control_a, control_b = st.columns([2, 3])
+with control_a:
+    pick_islands = multiselect_all("Island", df["island"].dropna().unique().tolist(), key="renew_price_islands")
+with control_b:
+    d0, d1 = date_range_filter(df, "trading_date", key="renew_price_dates")
 
 mask = df["trading_date"].between(d0, d1)
 if pick_islands:
     mask &= df["island"].isin(pick_islands)
-view = df[mask].dropna(subset=["renewable_pct"])
+view = df[mask].dropna(subset=["renewable_pct", "price_nzd_mwh"]).copy()
+
 if view.empty:
-    st.warning("No rows after filtering.")
+    st.warning("No renewable-price rows match the selected filters.")
     st.stop()
 
-
-# ─── KPI strip ─────────────────────────────────────────────────
 mean_renew = view["renewable_pct"].mean()
 mean_price = view["price_nzd_mwh"].mean()
-# Pearson correlation (note: bounded variable, interpret cautiously)
-corr = view[["renewable_pct", "price_nzd_mwh"]].corr().iloc[0, 1]
+corr = view[["renewable_pct", "price_nzd_mwh"]].corr().iloc[0, 1] if len(view) >= 2 else pd.NA
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("TPs covered", f"{len(view):,}")
-k2.metric("Avg renewable %", f"{mean_renew:,.1f}%")
-k3.metric("Avg price", f"${mean_price:,.1f}/MWh")
-k4.metric("Pearson r",
-          f"{corr:+.2f}",
-          help="Correlation between renewable share and price across "
-               "all TP-level observations.")
+k1.metric("Trading periods covered", fmt_int(len(view)))
+k2.metric("Average renewable share", fmt_pct(mean_renew))
+k3.metric("Average price", fmt_price(mean_price, 1))
+k4.metric("Correlation", f"{corr:+.2f}" if pd.notna(corr) else "N/A", help="Pearson correlation for the selected rows.")
+
+insight_box(
+    "Interpretation guardrail",
+    "A negative correlation supports the idea that more renewable output can coincide with lower prices, but this view does not prove causation.",
+)
 
 
-# ─── renewable-band bar chart ─────────────────────────────────
-st.subheader("Average price by renewable-share band")
-
-
-def _band(p):
-    if pd.isna(p):
-        return "no gen"
-    if p >= 100:
-        return "100% renew"
-    if p >= 75:
-        return "75–99%"
-    if p >= 50:
-        return "50–74%"
-    if p >= 25:
-        return "25–49%"
-    if p > 0:
-        return "1–24%"
+def _band(value: float) -> str:
+    if pd.isna(value):
+        return "No generation"
+    if value >= 100:
+        return "100%"
+    if value >= 75:
+        return "75-99%"
+    if value >= 50:
+        return "50-74%"
+    if value >= 25:
+        return "25-49%"
+    if value > 0:
+        return "1-24%"
     return "0%"
 
 
-bands = ["0%", "1–24%", "25–49%", "50–74%", "75–99%", "100% renew"]
+st.subheader("Average price by renewable-share band")
+bands = ["0%", "1-24%", "25-49%", "50-74%", "75-99%", "100%"]
 view = view.assign(band=view["renewable_pct"].map(_band))
 band_stats = (
     view.groupby("band")
-        .agg(n_tps=("price_nzd_mwh", "size"),
-             avg_price=("price_nzd_mwh", "mean"))
-        .reindex(bands).dropna(how="all").reset_index()
+    .agg(n_tps=("price_nzd_mwh", "size"), avg_price=("price_nzd_mwh", "mean"))
+    .reindex(bands)
+    .dropna(how="all")
+    .reset_index()
 )
 fig = px.bar(
-    band_stats, x="band", y="avg_price",
+    band_stats,
+    x="band",
+    y="avg_price",
     text=band_stats["avg_price"].round(0).map("${:.0f}".format),
-    labels={"band": "renewable share", "avg_price": "avg $/MWh"},
+    labels={"band": "Renewable share band", "avg_price": "Average $/MWh"},
 )
-fig.update_traces(marker_color="#4CAF50", textposition="outside")
+fig.update_traces(marker_color="#2E7D32", textposition="outside")
 apply_layout(fig, height=380)
-st.plotly_chart(fig, use_container_width=True)
-st.caption(
-    f"Across {len(view):,} TP observations, the relationship is non-monotonic — "
-    "the mid-renewable band (50-74%) often sits *higher* than fully renewable "
-    "POCs, suggesting price is driven more by location and load than by green-share."
-)
+st.plotly_chart(fig, width="stretch")
 
-
-# ─── scatter ──────────────────────────────────────────────────
-st.subheader("Renewable% × price (sampled)")
+st.subheader("Renewable share vs price sample")
 sample = view.sample(min(8000, len(view)), random_state=42)
 fig2 = px.scatter(
-    sample, x="renewable_pct", y="price_nzd_mwh", color="island",
+    sample,
+    x="renewable_pct",
+    y="price_nzd_mwh",
+    color="island",
     opacity=0.35,
-    labels={"renewable_pct": "renewable share %", "price_nzd_mwh": "$/MWh"},
+    labels={"renewable_pct": "Renewable share %", "price_nzd_mwh": "$/MWh", "island": "Island"},
 )
 fig2.update_traces(marker=dict(size=4))
 apply_layout(fig2, height=460)
-st.plotly_chart(fig2, use_container_width=True)
+st.plotly_chart(fig2, width="stretch")
+
+with st.expander("Band details"):
+    st.dataframe(
+        band_stats.rename(
+            columns={
+                "band": "Renewable share band",
+                "n_tps": "Trading periods",
+                "avg_price": "Average price $/MWh",
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )

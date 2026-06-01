@@ -1,102 +1,99 @@
-"""Island Spread — North vs South Island wholesale price comparison."""
+"""North Island vs South Island wholesale price comparison."""
 
 from __future__ import annotations
 
-import pandas as pd
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import plotly.express as px
 import plotly.graph_objects as go
 from charts import apply_layout
 from loader import load_price_daily
+from ui import date_range_filter, fmt_price, insight_box, page_header
 
 import streamlit as st
 
-st.title("🏝️ Island Spread")
-st.caption(
-    "Daily mean NI vs SI price (and the spread). Built on `mart_price_daily` "
-    "with a GROUP BY island — this is the V4.2 reduction of the original "
-    "`mart_island_price_spread` mart (PRD §5.2)."
+page_header(
+    "Island Price Spread",
+    "Is one island consistently paying more than the other?",
+    "Positive spread means the North Island daily average is above the South Island daily average.",
 )
 
-df = load_price_daily().dropna(subset=["island"])
-if df.empty:
-    st.info("No price data with island attribution — load NSP first.")
+try:
+    df = load_price_daily().dropna(subset=["island"])
+except Exception:
+    st.error("Could not load the island price summary for this environment.")
     st.stop()
 
+if df.empty:
+    st.info("No price data with island attribution is available. Load Network Supply Points first.")
+    st.stop()
 
-# ─── filter to date range ──────────────────────────────────────
-d0, d1 = df["trading_date"].min(), df["trading_date"].max()
-date_range = st.date_input("Date range", value=(d0, d1), min_value=d0, max_value=d1)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    d0, d1 = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-view = df[df["trading_date"].between(d0, d1)]
+d0, d1 = date_range_filter(df, "trading_date", key="island_spread_dates")
+view = df[df["trading_date"].between(d0, d1)].copy()
 
-# Aggregate to island × date
 island_daily = (
-    view.groupby(["trading_date", "island"])["avg_price_all"]
+    view.groupby(["trading_date", "island"], as_index=False)["avg_price_all"]
     .mean()
-    .reset_index()
 )
 pivot = island_daily.pivot(index="trading_date", columns="island", values="avg_price_all")
 
 if "NI" not in pivot.columns or "SI" not in pivot.columns:
-    st.warning("Need both NI and SI in the date range for spread analysis.")
+    st.warning("The selected date range needs both NI and SI prices for spread analysis.")
     st.stop()
 
 pivot["spread"] = pivot["NI"] - pivot["SI"]
-
-
-# ─── KPI strip ────────────────────────────────────────────────
 mean_ni = pivot["NI"].mean()
 mean_si = pivot["SI"].mean()
 mean_spread = pivot["spread"].mean()
 max_abs_spread = pivot["spread"].abs().max()
+dominant_side = "North Island" if mean_spread > 0 else "South Island" if mean_spread < 0 else "Neither island"
 
 k1, k2, k3, k4 = st.columns(4)
-k1.metric("Avg NI price", f"${mean_ni:,.1f}/MWh")
-k2.metric("Avg SI price", f"${mean_si:,.1f}/MWh")
-k3.metric("Mean spread (NI−SI)",
-          f"${mean_spread:+,.1f}/MWh",
-          delta=f"{100 * mean_spread / mean_si:+.1f}% of SI" if mean_si else None)
-k4.metric("Max |spread|", f"${max_abs_spread:,.1f}/MWh")
+k1.metric("Average NI price", fmt_price(mean_ni, 1))
+k2.metric("Average SI price", fmt_price(mean_si, 1))
+k3.metric("Mean spread NI - SI", fmt_price(mean_spread, 1))
+k4.metric("Largest absolute spread", fmt_price(max_abs_spread, 1))
 
+insight_box(
+    "Market read",
+    f"{dominant_side} was more expensive on average in this selection. Persistent spreads can indicate inter-island transfer constraints or regional scarcity.",
+)
 
-# ─── side-by-side daily means ─────────────────────────────────
-st.subheader("Daily mean by island")
+st.subheader("Daily average price by island")
 fig = px.line(
-    island_daily, x="trading_date", y="avg_price_all", color="island",
-    labels={"avg_price_all": "$/MWh", "trading_date": "Date"},
+    island_daily,
+    x="trading_date",
+    y="avg_price_all",
+    color="island",
+    labels={"avg_price_all": "$/MWh", "trading_date": "Date", "island": "Island"},
     color_discrete_map={"NI": "#1565C0", "SI": "#EF6C00"},
 )
 apply_layout(fig, height=380)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width="stretch")
 
-
-# ─── spread bar chart ─────────────────────────────────────────
-st.subheader("Daily spread (NI − SI)")
+st.subheader("Daily spread: NI minus SI")
 spread_df = pivot.reset_index()[["trading_date", "spread"]]
-fig2 = go.Figure(go.Bar(
-    x=spread_df["trading_date"], y=spread_df["spread"],
-    marker_color=["#1565C0" if v >= 0 else "#EF6C00" for v in spread_df["spread"]],
-))
-fig2.update_layout(
-    yaxis_title="$/MWh (NI − SI)", xaxis_title="Date",
+fig2 = go.Figure(
+    go.Bar(
+        x=spread_df["trading_date"],
+        y=spread_df["spread"],
+        marker_color=["#1565C0" if value >= 0 else "#EF6C00" for value in spread_df["spread"]],
+    )
 )
+fig2.update_layout(yaxis_title="$/MWh (NI - SI)", xaxis_title="Date")
 apply_layout(fig2, height=320)
-st.plotly_chart(fig2, use_container_width=True)
+st.plotly_chart(fig2, width="stretch")
 
-
-# ─── spread distribution ──────────────────────────────────────
 st.subheader("Spread distribution")
 fig3 = px.histogram(
-    spread_df, x="spread", nbins=30,
-    labels={"spread": "NI − SI ($/MWh)"},
+    spread_df,
+    x="spread",
+    nbins=30,
+    labels={"spread": "NI - SI ($/MWh)"},
 )
 fig3.update_traces(marker_color="#5C6BC0")
 apply_layout(fig3, height=280)
-st.plotly_chart(fig3, use_container_width=True)
-
-st.caption(
-    "Positive spread = NI more expensive than SI. NZ's HVDC inter-island link "
-    "(Cook Strait) keeps spreads usually narrow; persistent positive spreads "
-    "typically indicate HVDC export constraints from SI."
-)
+st.plotly_chart(fig3, width="stretch")

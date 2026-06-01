@@ -183,6 +183,12 @@ The cloud path provisions or uses:
 | Snowflake stage | `RAW.RAW_STAGE` pointing to the S3 raw prefix |
 | Airflow | Monthly ingestion, S3 upload, Snowflake load, dbt run/test, artifact capture |
 
+The current cloud evidence includes completed S3 and Snowflake backfills for
+reconciled market volumes, plus completed Offers S3 landing runs for later
+market-depth work.
+
+![Airflow DAG list showing completed volume and Offers backfills](docs/screenshots/airflow-dag-list-full-backfill-complete.jpg)
+
 Host-side dbt and Streamlit commands may need the local private key path instead of the container path:
 
 ```bash
@@ -255,6 +261,12 @@ The analytical marts answer these business questions:
 | Cross-source analysis | Renewable share versus price, hydro storage versus price |
 | Operations | dbt model/test success rate, freshness, Snowflake warehouse usage |
 
+Snowflake object evidence for the market-volume path:
+
+![Snowflake market volume layer row counts and table sizes](docs/screenshots/snowflake-market-volume-layer-table-sizes.jpg)
+
+![Snowflake analytics schema with fct_market_volume and market marts](docs/screenshots/snowflake-analytics-schema-tree.jpg)
+
 ## Data Quality and Reconciliation
 
 The project uses dbt tests as deployment gates.
@@ -275,6 +287,14 @@ uv run python scripts/mini_poc_fixture.py
 ```
 
 `scripts/mini_poc_fixture.py` is the strongest cross-warehouse check: it materializes a small fixture on DuckDB and Snowflake and compares the output row by row.
+
+Recent reconciled-volume validation in Snowflake:
+
+![Snowflake raw market volume coverage query result](docs/screenshots/snowflake-raw-market-volume-coverage-query.jpg)
+
+![Snowflake price to volume coverage result](docs/screenshots/snowflake-price-volume-coverage-overall.jpg)
+
+![Snowflake monthly price to volume coverage result](docs/screenshots/snowflake-price-volume-coverage-by-month.jpg)
 
 ## Observability
 
@@ -306,7 +326,15 @@ make cloud-dashboard
 
 The Streamlit dashboard is intentionally thin: it queries the mart layer and avoids embedding transformation logic in the UI. That keeps dbt as the source of truth and allows another BI tool, such as Power BI, to consume the same tables.
 
-Current dashboard screenshots are stored in `docs/screenshots/`.
+Cloud-mode Streamlit examples:
+
+![Streamlit executive overview in Snowflake cloud mode](docs/screenshots/streamlit-executive-overview-cloud.jpg)
+
+![Streamlit wholesale price overview in Snowflake cloud mode](docs/screenshots/streamlit-price-overview-cloud.jpg)
+
+![Streamlit fuel mix trend in Snowflake cloud mode](docs/screenshots/streamlit-fuel-mix-trend-cloud.jpg)
+
+Current dashboard and evidence screenshots are stored in `docs/screenshots/`.
 
 ## Evidence Pack for Interviews
 

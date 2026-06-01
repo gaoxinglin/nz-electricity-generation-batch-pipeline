@@ -1,6 +1,11 @@
-"""Market Context — price spike explanation using volume and offer-curve marts."""
+"""Explain price spikes using volume and offer-curve context."""
 
 from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 import plotly.express as px
@@ -8,47 +13,41 @@ import plotly.graph_objects as go
 from charts import apply_layout
 from loader import load_market_context_window, load_market_spike_context
 from plotly.subplots import make_subplots
+from ui import date_range_filter, fmt_int, fmt_mw, fmt_pct, fmt_price, insight_box, multiselect_all, page_header
 
 import streamlit as st
 
 SPIKE_THRESHOLD = 300
 
-st.title("📉 Market Context")
-st.caption(
-    "Spike-level context from `mart_price_offer_context`: price, reconciled "
-    "injection/offtake, and compact offer-curve features."
+page_header(
+    "Spike Drivers",
+    "When prices spike, was the local market short on cheap supply, volume, or both?",
+    "This page uses optional offer and reconciled-volume summaries. It stays quiet when those summaries are not loaded.",
 )
 
 try:
     df = load_market_spike_context()
-except Exception as exc:
-    st.error(f"Could not load market context marts: {exc}")
+except Exception:
+    st.info(
+        "Spike-driver context is not loaded in this environment. Run the volume and offer transformations, then return to this page."
+    )
     st.stop()
 
 if df.empty:
-    st.info(
-        "No price spikes are available yet. Load price data and run dbt models "
-        "through `mart_price_offer_context`."
-    )
+    st.info("No spike-driver rows are available for the loaded period.")
     st.stop()
 
 df["has_offer_curve"] = df["total_offered_mw"].notna()
 df["has_volume"] = df["offtake_mw"].notna() | df["injection_mw"].notna()
 
-
-# ─── filters ────────────────────────────────────────────────────────────────
-c1, c2, c3 = st.columns([1.3, 2.2, 2.5])
-with c1:
-    islands_available = sorted(df["island"].dropna().unique().tolist())
-    pick_islands = st.multiselect("Island", islands_available, default=islands_available)
-with c2:
-    d0, d1 = df["trading_date"].min(), df["trading_date"].max()
-    date_range = st.date_input("Date range", value=(d0, d1), min_value=d0, max_value=d1)
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        d0, d1 = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
-with c3:
+control_a, control_b, control_c = st.columns([1.4, 2.1, 2.5])
+with control_a:
+    pick_islands = multiselect_all("Island", df["island"].dropna().unique().tolist(), key="context_islands")
+with control_b:
+    d0, d1 = date_range_filter(df, "trading_date", key="context_dates")
+with control_c:
     poc_options = sorted(df["poc_code"].dropna().unique().tolist())
-    pick_pocs = st.multiselect("POC", poc_options, default=[])
+    pick_pocs = st.multiselect("Node", poc_options, default=[], key="context_pocs")
 
 mask = df["trading_date"].between(d0, d1)
 if pick_islands:
@@ -58,51 +57,47 @@ if pick_pocs:
 view = df[mask].copy()
 
 if view.empty:
-    st.warning("No spike events match those filters.")
+    st.warning("No spike-driver rows match the selected filters.")
     st.stop()
 
-
-# ─── KPI strip ──────────────────────────────────────────────────────────────
 offer_coverage = 100.0 * view["has_offer_curve"].mean()
 volume_coverage = 100.0 * view["has_volume"].mean()
 avg_cheap_share = view["cheap_offer_share_below_300"].mean()
-avg_cheap_share_txt = "N/A" if pd.isna(avg_cheap_share) else f"{avg_cheap_share:.0%}"
 
 k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Spike events", f"{len(view):,}")
-k2.metric("Peak price", f"${view['price_nzd_mwh'].max():,.0f}/MWh")
-k3.metric("Median offtake", f"{view['offtake_mw'].median():,.0f} MW")
-k4.metric("Offer coverage", f"{offer_coverage:.0f}%")
-k5.metric("Cheap-offer share", avg_cheap_share_txt, help="Share of offered MW priced <= $300/MWh.")
+k1.metric("Spike events", fmt_int(len(view)))
+k2.metric("Peak price", fmt_price(view["price_nzd_mwh"].max()))
+k3.metric("Median offtake", fmt_mw(view["offtake_mw"].median()))
+k4.metric("Offer coverage", fmt_pct(offer_coverage, 0))
+k5.metric("Cheap-offer share", fmt_pct(avg_cheap_share * 100, 0) if pd.notna(avg_cheap_share) else "N/A")
 
-if offer_coverage < 50:
+if offer_coverage < 50 or volume_coverage < 50:
     st.info(
-        "Offer context is sparse in this selection. That is expected when only "
-        "price/volume data has been loaded, or when Offers were loaded for a "
-        "sample day rather than the whole month."
+        "Some context is sparse in this selection. That usually means the price mart is loaded but volume or offers "
+        "were loaded for only part of the period."
     )
-if volume_coverage < 50:
-    st.info("Reconciled volume context is sparse in this selection.")
+else:
+    insight_box(
+        "Practical read",
+        "Low cheap-offer share plus high offtake points to a thin local supply stack. High price with normal offers may point to constraints or node-specific effects.",
+    )
 
-
-# ─── charts ────────────────────────────────────────────────────────────────
 left, right = st.columns(2)
-
 with left:
-    st.subheader("Spike count by day")
-    daily = view.groupby("trading_date").size().reset_index(name="spike_events")
+    st.subheader("Spike events by day")
+    daily = view.groupby("trading_date", as_index=False).size().rename(columns={"size": "spike_events"})
     fig_daily = px.bar(
         daily,
         x="trading_date",
         y="spike_events",
         labels={"trading_date": "Date", "spike_events": "Spike events"},
     )
-    fig_daily.update_traces(marker_color="#D32F2F")
+    fig_daily.update_traces(marker_color="#C62828")
     apply_layout(fig_daily, height=330)
-    st.plotly_chart(fig_daily, use_container_width=True)
+    st.plotly_chart(fig_daily, width="stretch")
 
 with right:
-    st.subheader("Top POCs by spike count")
+    st.subheader("Nodes with repeated spikes")
     top_poc = (
         view.groupby(["poc_code", "island"], dropna=False)
         .agg(spike_events=("price_nzd_mwh", "size"), peak_price=("price_nzd_mwh", "max"))
@@ -116,18 +111,17 @@ with right:
         y="poc_code",
         color="island",
         orientation="h",
-        labels={"spike_events": "Spike events", "poc_code": "POC"},
+        labels={"spike_events": "Spike events", "poc_code": "Node", "island": "Island"},
     )
     apply_layout(fig_top, height=330)
-    st.plotly_chart(fig_top, use_container_width=True)
+    st.plotly_chart(fig_top, width="stretch")
 
 left2, right2 = st.columns(2)
-
 with left2:
-    st.subheader("Price vs offtake")
+    st.subheader("Price vs local offtake")
     scatter = view.dropna(subset=["offtake_mw"])
     if scatter.empty:
-        st.info("No offtake values available for selected spikes.")
+        st.info("No offtake values are available for selected spikes.")
     else:
         fig_load = px.scatter(
             scatter,
@@ -135,16 +129,16 @@ with left2:
             y="price_nzd_mwh",
             color="island",
             hover_data=["trading_date", "tp_number", "poc_code", "total_offered_mw"],
-            labels={"offtake_mw": "Offtake MW", "price_nzd_mwh": "$/MWh"},
+            labels={"offtake_mw": "Offtake MW", "price_nzd_mwh": "$/MWh", "island": "Island"},
         )
         apply_layout(fig_load, height=360)
-        st.plotly_chart(fig_load, use_container_width=True)
+        st.plotly_chart(fig_load, width="stretch")
 
 with right2:
-    st.subheader("Price vs cheap offer share")
+    st.subheader("Price vs cheap-offer share")
     offer_scatter = view.dropna(subset=["cheap_offer_share_below_300"])
     if offer_scatter.empty:
-        st.info("No offer-curve rows available for selected spikes.")
+        st.info("No offer-curve rows are available for selected spikes.")
     else:
         fig_offer = px.scatter(
             offer_scatter,
@@ -155,37 +149,38 @@ with right2:
             labels={
                 "cheap_offer_share_below_300": "Share of offered MW <= $300/MWh",
                 "price_nzd_mwh": "$/MWh",
+                "island": "Island",
             },
         )
         fig_offer.update_xaxes(tickformat=".0%")
         apply_layout(fig_offer, height=360)
-        st.plotly_chart(fig_offer, use_container_width=True)
+        st.plotly_chart(fig_offer, width="stretch")
 
-
-# ─── event selector and local context ───────────────────────────────────────
 st.divider()
 st.subheader("Event drill-down")
 
-events = view.sort_values(["trading_date", "tp_number", "price_nzd_mwh"], ascending=[False, True, False]).copy()
+events = view.sort_values(
+    ["trading_date", "tp_number", "price_nzd_mwh"],
+    ascending=[False, True, False],
+).copy()
 events["event_label"] = (
     events["trading_date"].dt.strftime("%Y-%m-%d")
     + " TP"
     + events["tp_number"].astype(str).str.zfill(2)
-    + " · "
+    + " | "
     + events["poc_code"]
-    + " · $"
-    + events["price_nzd_mwh"].round(0).astype(int).astype(str)
-    + "/MWh"
+    + " | "
+    + events["price_nzd_mwh"].map(lambda value: fmt_price(value))
 )
 
 selected_label = st.selectbox("Spike event", events["event_label"].tolist())
 selected = events.loc[events["event_label"] == selected_label].iloc[0]
 
 detail_cols = st.columns(5)
-detail_cols[0].metric("Price", f"${selected['price_nzd_mwh']:,.0f}/MWh")
-detail_cols[1].metric("Offtake", f"{selected['offtake_mw']:,.0f} MW" if pd.notna(selected["offtake_mw"]) else "N/A")
-detail_cols[2].metric("Injection", f"{selected['injection_mw']:,.0f} MW" if pd.notna(selected["injection_mw"]) else "N/A")
-detail_cols[3].metric("Total offered", f"{selected['total_offered_mw']:,.0f} MW" if pd.notna(selected["total_offered_mw"]) else "N/A")
+detail_cols[0].metric("Price", fmt_price(selected["price_nzd_mwh"]))
+detail_cols[1].metric("Offtake", fmt_mw(selected["offtake_mw"]))
+detail_cols[2].metric("Injection", fmt_mw(selected["injection_mw"]))
+detail_cols[3].metric("Total offered", fmt_mw(selected["total_offered_mw"]))
 detail_cols[4].metric(
     "Offer/load ratio",
     f"{selected['offered_to_offtake_ratio']:.2f}x" if pd.notna(selected["offered_to_offtake_ratio"]) else "N/A",
@@ -193,12 +188,7 @@ detail_cols[4].metric(
 
 event_date = selected["trading_date"].strftime("%Y-%m-%d")
 event_tp = int(selected["tp_number"])
-window = load_market_context_window(
-    selected["poc_code"],
-    event_date,
-    event_tp - 6,
-    event_tp + 6,
-)
+window = load_market_context_window(selected["poc_code"], event_date, event_tp - 6, event_tp + 6)
 
 if window.empty:
     st.info("No same-day trading-period context is available for this event.")
@@ -220,7 +210,7 @@ else:
             y=window["total_offered_mw"],
             name="Total offered MW",
             mode="lines+markers",
-            line={"color": "#00897B", "width": 2},
+            line={"color": "#2E7D32", "width": 2},
         ),
         secondary_y=False,
     )
@@ -230,21 +220,16 @@ else:
             y=window["price_nzd_mwh"],
             name="Price $/MWh",
             mode="lines+markers",
-            line={"color": "#D32F2F", "width": 3},
+            line={"color": "#C62828", "width": 3},
         ),
         secondary_y=True,
     )
-    fig_window.add_hline(
-        y=SPIKE_THRESHOLD,
-        line_dash="dot",
-        line_color="#D32F2F",
-        secondary_y=True,
-    )
+    fig_window.add_hline(y=SPIKE_THRESHOLD, line_dash="dot", line_color="#C62828", secondary_y=True)
     fig_window.update_yaxes(title_text="MW", secondary_y=False)
     fig_window.update_yaxes(title_text="$/MWh", secondary_y=True)
     fig_window.update_xaxes(dtick=1, title_text="Trading period")
     apply_layout(fig_window, height=420)
-    st.plotly_chart(fig_window, use_container_width=True)
+    st.plotly_chart(fig_window, width="stretch")
 
     window["cheap_offer_share_pct"] = window["cheap_offer_share_below_300"] * 100
     display_cols = [
@@ -260,7 +245,7 @@ else:
     ]
     st.dataframe(
         window[display_cols],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "tp_number": st.column_config.NumberColumn("TP", format="%d"),
@@ -279,9 +264,3 @@ else:
             "offered_to_offtake_ratio": st.column_config.NumberColumn("Offer/load ratio", format="%.2f"),
         },
     )
-
-st.caption(
-    "A low cheap-offer share or low offer/load ratio around a spike usually "
-    "means the local supply stack was thin or expensive. Missing offer values "
-    "mean Offers have not been loaded for that trading day."
-)

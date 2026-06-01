@@ -1,62 +1,57 @@
-"""
-NZ Electricity Generation Dashboard
-Entry point — sets page config and navigation only.
+"""NZ electricity market dashboard entry point.
+
 Run: streamlit run streamlit/app.py
 """
 
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st
+from ui import inject_global_styles
 
 st.set_page_config(
-    page_title="NZ Electricity Generation",
+    page_title="NZ Electricity Market Monitor",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.markdown("""
-<style>
-    /* Tighten metric cards */
-    div[data-testid="metric-container"] {
-        background: var(--secondary-background-color);
-        border-radius: 10px;
-        padding: 16px 20px;
-        border: 1px solid rgba(128,128,128,0.12);
-    }
-    /* Remove top padding from main block */
-    .block-container { padding-top: 1.5rem; }
-</style>
-""", unsafe_allow_html=True)
+inject_global_styles()
 
 pg = st.navigation({
-    "Generation (V1)": [
-        st.Page("pages/overview.py",        title="Overview",          icon="📊", default=True),
-        st.Page("pages/fuel_trends.py",     title="Fuel Trends",       icon="📈"),
-        st.Page("pages/plant_ranking.py",   title="Plant Ranking",     icon="🏆"),
-        st.Page("pages/renewable_share.py", title="Renewable Share",   icon="🌱"),
-        st.Page("pages/seasonal.py",        title="Seasonal Patterns", icon="🌤️"),
+    "Start here": [
+        st.Page("pages/overview.py", title="Executive overview", default=True),
     ],
-    "Wholesale Price (V2)": [
-        st.Page("pages/price_overview.py",  title="Price Overview",   icon="⚡"),
-        st.Page("pages/price_spikes.py",    title="Price Spikes",     icon="🔺"),
-        st.Page("pages/market_context.py",  title="Market Context",   icon="📉"),
-        st.Page("pages/renewable_price.py", title="Renewable vs Price", icon="🌿"),
-        st.Page("pages/island_spread.py",   title="Island Spread",    icon="🏝️"),
+    "Generation supply": [
+        st.Page("pages/fuel_trends.py", title="Fuel mix trend"),
+        st.Page("pages/plant_ranking.py", title="Largest stations"),
+        st.Page("pages/renewable_share.py", title="Renewable share"),
+        st.Page("pages/seasonal.py", title="Seasonal pattern"),
     ],
-    "Hydro (V3)": [
-        st.Page("pages/hydro_price_driver.py", title="Hydro-Price Driver", icon="💧"),
+    "Wholesale prices": [
+        st.Page("pages/price_overview.py", title="Price overview"),
+        st.Page("pages/price_spikes.py", title="Price spikes"),
+        st.Page("pages/market_context.py", title="Spike drivers"),
+        st.Page("pages/renewable_price.py", title="Renewables and price"),
+        st.Page("pages/island_spread.py", title="Island price spread"),
+        st.Page("pages/hydro_price_driver.py", title="Hydro storage driver"),
     ],
-    "Operations": [
-        st.Page("pages/pipeline_health.py", title="Pipeline Health",  icon="🩺"),
+    "Data product health": [
+        st.Page("pages/pipeline_health.py", title="Pipeline health"),
     ],
 })
 
 with st.sidebar:
     mode = os.environ.get("NZEG_MODE", "local").lower()
-    badge = "🟢 Local (DuckDB)" if mode == "local" else "☁️ Cloud (Snowflake)"
+    badge = "Local DuckDB" if mode == "local" else "Cloud Snowflake"
+    st.markdown("### NZ Electricity Market Monitor")
     st.caption(f"Mode: **{badge}**")
-    st.caption("Source: Electricity Authority (EMI). Data refreshes hourly.")
+    st.caption("Source: Electricity Authority EMI public datasets.")
+    st.caption("The dashboard reads curated analytics tables, so every number should be traceable.")
     st.divider()
+    st.caption("Use the first page for the project story, then drill into generation, price risk, and pipeline health.")
 
 pg.run()
