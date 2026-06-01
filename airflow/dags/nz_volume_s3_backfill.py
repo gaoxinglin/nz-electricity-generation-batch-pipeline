@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import requests
+
 from airflow import DAG
 from airflow.exceptions import AirflowSkipException
 from airflow.operators.python import PythonOperator

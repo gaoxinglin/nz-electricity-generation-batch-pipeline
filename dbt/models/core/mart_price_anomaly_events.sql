@@ -33,14 +33,14 @@ WITH price AS (
 with_context AS (
     SELECT
         p.*,
-        AVG(price_nzd_mwh) OVER (
-            PARTITION BY poc_code
-            ORDER BY trading_period_start_ts
+        AVG(p.price_nzd_mwh) OVER (
+            PARTITION BY p.poc_code
+            ORDER BY p.trading_period_start_ts
             RANGE BETWEEN INTERVAL '30 DAYS' PRECEDING AND INTERVAL '1 SECOND' PRECEDING
         ) AS rolling_30d_avg_price,
-        STDDEV_SAMP(price_nzd_mwh) OVER (
-            PARTITION BY poc_code
-            ORDER BY trading_period_start_ts
+        STDDEV_SAMP(p.price_nzd_mwh) OVER (
+            PARTITION BY p.poc_code
+            ORDER BY p.trading_period_start_ts
             RANGE BETWEEN INTERVAL '30 DAYS' PRECEDING AND INTERVAL '1 SECOND' PRECEDING
         ) AS rolling_30d_stddev_price
     FROM price AS p

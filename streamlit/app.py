@@ -9,8 +9,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import streamlit as st
 from ui import inject_global_styles
+
+import streamlit as st
 
 st.set_page_config(
     page_title="NZ Electricity Market Monitor",
